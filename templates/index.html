@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEoWave 자동매매 대시보드</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg-dark:    #0d1117;
+      --bg-card:    #161b22;
+      --bg-card2:   #1c2128;
+      --border:     #30363d;
+      --text-main:  #e6edf3;
+      --text-muted: #8b949e;
+      --green:      #3fb950;
+      --red:        #f85149;
+      --blue:       #58a6ff;
+      --orange:     #d29922;
+      --purple:     #bc8cff;
+    }
+    body { background: var(--bg-dark); color: var(--text-main); font-family: 'Segoe UI', sans-serif; }
+    .navbar { background: var(--bg-card) !important; border-bottom: 1px solid var(--border); }
+    .card  { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; }
+    .card-inner { background: var(--bg-card2); border: 1px solid var(--border); border-radius: 8px; }
+
+    /* 통계 카드 */
+    .stat-card { padding: 18px 22px; border-radius: 12px; border: 1px solid var(--border);
+                 background: var(--bg-card); transition: transform .15s; }
+    .stat-card:hover { transform: translateY(-2px); }
+    .stat-label { font-size: .78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+    .stat-value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; }
+    .stat-sub   { font-size: .82rem; color: var(--text-muted); margin-top: 2px; }
+
+    /* 테이블 */
+    .table-dark { --bs-table-bg: transparent; --bs-table-striped-bg: #1c2128; }
+    .table th   { color: var(--text-muted); font-size: .78rem; text-transform: uppercase;
+                  letter-spacing: .05em; border-color: var(--border); font-weight: 500; }
+    .table td   { border-color: var(--border); font-size: .88rem; vertical-align: middle; }
+    .table tbody tr:hover { background: #21262d !important; cursor: pointer; }
+
+    /* 뱃지 */
+    .badge-long  { background: rgba(63,185,80,.18); color: var(--green); border: 1px solid rgba(63,185,80,.4); }
+    .badge-short { background: rgba(248,81,73,.18); color: var(--red);   border: 1px solid rgba(248,81,73,.4); }
+    .badge-open  { background: rgba(88,166,255,.15); color: var(--blue); border: 1px solid rgba(88,166,255,.4); }
+    .badge-tp    { background: rgba(63,185,80,.15);  color: var(--green); }
+    .badge-sl    { background: rgba(248,81,73,.15);  color: var(--red);   }
+    .badge-manual{ background: rgba(139,148,158,.15); color: var(--text-muted); }
+
+    .pnl-pos { color: var(--green); font-weight: 600; }
+    .pnl-neg { color: var(--red);   font-weight: 600; }
+
+    /* 모달 */
+    .modal-content { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-main); }
+    .modal-header  { border-bottom: 1px solid var(--border); }
+    .modal-footer  { border-top: 1px solid var(--border); }
+    .reason-box    { background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px;
+                     padding: 16px; font-family: 'Consolas', monospace; font-size: .83rem;
+                     white-space: pre-wrap; color: var(--text-main); max-height: 450px; overflow-y: auto; }
+
+    /* 가격표 */
+    .price-table td:first-child { color: var(--text-muted); width: 130px; }
+    .price-table td:last-child  { font-weight: 600; }
+
+    /* 스크롤바 */
+    ::-webkit-scrollbar       { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-dark); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                background: var(--green); animation: blink 1.4s infinite; margin-right: 6px; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    .wave-badge { font-size:.75rem; padding:2px 8px; border-radius:20px;
+                  background:rgba(188,140,255,.15); color:var(--purple); border:1px solid rgba(188,140,255,.35); }
+    .prg-badge  { font-size:.75rem; padding:2px 8px; border-radius:20px;
+                  background:rgba(210,153,34,.15); color:var(--orange); border:1px solid rgba(210,153,34,.35); }
+    .rsi-badge  { font-size:.75rem; padding:2px 8px; border-radius:20px;
+                  background:rgba(88,166,255,.15); color:var(--blue); border:1px solid rgba(88,166,255,.35); }
+
+    /* 로그 뷰어 */
+    #logViewer {
+      background: #0a0e13; border: 1px solid var(--border); border-radius: 8px;
+      font-family: 'Consolas', 'D2Coding', monospace; font-size: .78rem;
+      height: 320px; overflow-y: auto; padding: 10px 14px; color: #c9d1d9;
+      line-height: 1.55;
+    }
+    #logViewer .log-info  { color: #c9d1d9; }
+    #logViewer .log-warn  { color: var(--orange); }
+    #logViewer .log-error { color: var(--red); font-weight: 600; }
+    #logViewer .log-signal{ color: var(--green); font-weight: 600; }
+    #logViewer .log-ts    { color: #444d56; margin-right: 6px; user-select: none; }
+    .log-dot-run  { background: var(--green); }
+    .log-dot-stop { background: var(--red); }
+  </style>
+</head>
+<body>
+
+  <!-- 지침서 모달 스타일 -->
+  <style>
+    #guidebookModal .modal-dialog { max-width: 860px; }
+    #guidebookModal .modal-content { background: var(--bg-card); }
+    .guidebook-body {
+      background: var(--bg-dark); border-radius: 8px; padding: 24px 28px;
+      max-height: 72vh; overflow-y: auto; color: var(--text-main);
+      font-size: .92rem; line-height: 1.75;
+    }
+    .guidebook-body h1,.guidebook-body h2 {
+      color: var(--blue); border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-top: 24px;
+    }
+    .guidebook-body h3 { color: var(--orange); margin-top: 18px; }
+    .guidebook-body strong { color: var(--text-main); }
+    .guidebook-body em { color: var(--purple); }
+    .guidebook-body code {
+      background: #21262d; color: var(--green); padding: 2px 6px; border-radius: 4px; font-size: .85em;
+    }
+    .guidebook-body blockquote {
+      border-left: 3px solid var(--blue); margin-left: 0;
+      padding-left: 14px; color: var(--text-muted);
+    }
+    .guidebook-body ul, .guidebook-body ol { padding-left: 22px; }
+    .guidebook-body li { margin-bottom: 4px; }
+    .guidebook-body hr { border-color: var(--border); }
+    .guidebook-toc {
+      background: var(--bg-card2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 18px; margin-bottom: 18px;
+    }
+    .guidebook-toc a { color: var(--blue); text-decoration: none; display: block; padding: 2px 0; font-size:.85rem; }
+    .guidebook-toc a:hover { color: var(--text-main); }
+    .search-highlight { background: rgba(88,166,255,.3); border-radius: 2px; }
+  </style>
+
+<!-- 네비게이션 -->
+<nav class="navbar navbar-dark px-4 py-2 mb-4">
+  <span class="navbar-brand fw-bold fs-5">
+    <i class="bi bi-activity text-success me-2"></i>NEoWave 자동매매 대시보드
+  </span>
+  <span class="d-flex align-items-center gap-2">
+    <button class="btn btn-sm btn-outline-warning" onclick="openGuidebook()">
+      <i class="bi bi-book me-1"></i>지침서 열람
+    </button>
+    <button class="btn btn-sm btn-outline-info" onclick="openGuidebookEdit()">
+      <i class="bi bi-pencil-square me-1"></i>지침서 편집
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="openParamsEditor()">
+      <i class="bi bi-sliders me-1"></i>파라미터
+    </button>
+    <span class="text-muted small ms-2">
+      <span class="live-dot"></span>{{ now }}
+    </span>
+    <button class="btn btn-sm btn-outline-secondary" onclick="location.reload()">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+  </span>
+</nav>
+
+<div class="container-fluid px-4">
+
+  <!-- 통계 카드 -->
+  <div class="row g-3 mb-4">
+    {% set win_rate = stats.get('win_rate', 0) %}
+    {% set total_pnl = stats.get('total_pnl', 0) %}
+
+    <div class="col-6 col-md-2">
+      <div class="stat-card">
+        <div class="stat-label"><i class="bi bi-list-check me-1"></i>총 거래</div>
+        <div class="stat-value text-white">{{ stats.get('total_trades', 0) }}</div>
+        <div class="stat-sub">오픈: {{ open_pos|length }}건</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="stat-card">
+        <div class="stat-label"><i class="bi bi-percent me-1"></i>승률</div>
+        <div class="stat-value {{ 'pnl-pos' if win_rate >= 50 else 'pnl-neg' }}">{{ win_rate }}%</div>
+        <div class="stat-sub">{{ stats.get('win',0) }}승 / {{ stats.get('loss',0) }}패</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="stat-card">
+        <div class="stat-label"><i class="bi bi-currency-dollar me-1"></i>누적 손익</div>
+        <div class="stat-value {{ 'pnl-pos' if total_pnl >= 0 else 'pnl-neg' }}">
+          {{ '{:+.4f}'.format(total_pnl) }}
+        </div>
+        <div class="stat-sub">USDT</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="stat-card">
+        <div class="stat-label"><i class="bi bi-graph-up me-1"></i>수익 팩터</div>
+        <div class="stat-value {{ 'pnl-pos' if stats.get('profit_factor',0) >= 1 else 'pnl-neg' }}">
+          {{ stats.get('profit_factor', 0) }}
+        </div>
+        <div class="stat-sub">손익비 1:{{ stats.get('avg_rr', 0) }}</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="stat-card">
+        <div class="stat-label"><i class="bi bi-lightning me-1"></i>PRG 승률</div>
+        <div class="stat-value" style="color:var(--orange)">{{ stats.get('prg_win_rate', '-') }}%</div>
+        <div class="stat-sub">RSI: {{ stats.get('rsi_win_rate', '-') }}%</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-2">
+      <div class="stat-card">
+        <div class="stat-label"><i class="bi bi-trophy me-1"></i>10x 승률</div>
+        <div class="stat-value" style="color:var(--purple)">{{ stats.get('both_win_rate', '-') }}%</div>
+        <div class="stat-sub">PRG + RSI 동시</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 파동별 승률 -->
+  {% if stats.get('wave_stats') %}
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="d-flex align-items-center mb-3">
+          <i class="bi bi-bar-chart-line text-primary me-2"></i>
+          <span class="fw-semibold">파동 위치별 승률</span>
+        </div>
+        <div class="d-flex flex-wrap gap-3">
+          {% for wp, ws in stats.wave_stats.items() %}
+            {% set total_w = ws.win + ws.loss %}
+            {% set wr = (ws.win / total_w * 100)|round(1) if total_w > 0 else 0 %}
+            <div class="card-inner px-4 py-3 text-center" style="min-width:130px">
+              <div class="wave-badge mb-2">{{ wp }}</div>
+              <div class="fs-4 fw-bold {{ 'pnl-pos' if wr >= 50 else 'pnl-neg' }}">{{ wr }}%</div>
+              <div class="text-muted small">{{ ws.win }}승 / {{ ws.loss }}패</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 오픈 포지션 -->
+  {% if open_pos %}
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="d-flex align-items-center mb-3">
+          <span class="live-dot"></span>
+          <span class="fw-semibold">오픈 포지션 ({{ open_pos|length }}건)</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0">
+            <thead>
+              <tr>
+                <th>ID</th><th>진입시간</th><th>코인</th><th>방향</th><th>레버</th>
+                <th>진입가</th>
+                <th style="min-width:140px">목표가 (TP)</th>
+                <th style="min-width:140px">손절가 (SL)</th>
+                <th>손익비</th><th>파동</th><th>PRG</th><th>RSI</th><th>신뢰도</th>
+                <th style="min-width:260px">매매 사유</th>
+                <th>상세</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in open_pos %}
+              <tr onclick="showDetail('{{ t.trade_id }}')" style="cursor:pointer">
+                <td><code class="text-info">{{ t.trade_id }}</code></td>
+                <td class="text-muted small">{{ t.entry_time[:16] }}</td>
+                <td><strong>{{ t.symbol }}</strong></td>
+                <td>
+                  <span class="badge rounded-pill {{ 'badge-long' if t.side == 'long' else 'badge-short' }}">
+                    {{ '▲ LONG' if t.side == 'long' else '▼ SHORT' }}
+                  </span>
+                </td>
+                <td><span class="badge bg-secondary">{{ t.leverage }}x</span></td>
+                <td class="fw-semibold">{{ t.entry_price }}</td>
+                <td>
+                  <span class="pnl-pos fw-semibold">{{ t.take_profit }}</span><br>
+                  <small class="text-muted">+{{ t.tp_pct }}% · RR 1:{{ t.rr_ratio }}</small>
+                </td>
+                <td>
+                  <span class="pnl-neg fw-semibold">{{ t.stop_loss }}</span><br>
+                  <small class="text-muted">-{{ t.sl_pct }}%</small>
+                </td>
+                <td class="text-center fw-semibold">1:{{ t.rr_ratio }}</td>
+                <td><span class="wave-badge">{{ t.wave_position }}</span></td>
+                <td>{{ '✓' if t.prg_confirmed in ('True', True) else '—' }}</td>
+                <td>{{ '✓' if t.rsi_confirmed in ('True', True) else '—' }}</td>
+                <td>
+                  {% set conf = t.confidence|float %}
+                  <span class="{{ 'pnl-pos' if conf >= 0.7 else 'pnl-neg' if conf < 0.55 else '' }}">
+                    {{ (conf * 100)|int }}%
+                  </span>
+                </td>
+                <td>
+                  <span class="text-muted small" style="display:block;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                        title="{{ t.reason_short }}">
+                    {{ t.reason_short or t.entry_reason or '—' }}
+                  </span>
+                </td>
+                <td>
+                  <button class="btn btn-sm btn-outline-info py-0 px-2"
+                          onclick="event.stopPropagation(); showDetail('{{ t.trade_id }}')">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 매매 내역 테이블 -->
+  <div class="row mb-5">
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <div class="d-flex align-items-center">
+            <i class="bi bi-journal-text text-warning me-2"></i>
+            <span class="fw-semibold">매매일지</span>
+            <span class="badge bg-secondary ms-2">{{ records|length }}건</span>
+          </div>
+          <div class="d-flex gap-2">
+            <input type="text" id="searchInput" class="form-control form-control-sm"
+                   placeholder="코인 검색..." style="width:160px;background:#21262d;border-color:var(--border);color:var(--text-main)"
+                   onkeyup="filterTable()">
+            <select id="statusFilter" class="form-select form-select-sm"
+                    style="width:110px;background:#21262d;border-color:var(--border);color:var(--text-main)"
+                    onchange="filterTable()">
+              <option value="">전체</option>
+              <option value="OPEN">오픈</option>
+              <option value="CLOSED">청산</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-dark table-striped table-hover mb-0" id="tradeTable">
+            <thead>
+              <tr>
+                <th>ID</th><th>진입시간</th><th>코인</th><th>방향</th><th>레버</th>
+                <th>진입가</th>
+                <th style="min-width:160px">목표가 (TP)</th>
+                <th style="min-width:140px">손절가 (SL)</th>
+                <th>청산가</th><th>PnL(U)</th><th>PnL(%)</th><th>손익비</th>
+                <th>청산사유</th><th>파동</th><th>PRG</th><th>RSI</th>
+                <th>신뢰도</th><th>상태</th>
+                <th style="min-width:280px">매매 사유</th>
+                <th>상세</th>
+              </tr>
+            </thead>
+            <tbody id="tradeBody">
+              {% for t in records %}
+              {% set pnl  = t.pnl_usdt|float %}
+              {% set conf = t.confidence|float %}
+              {% set rr   = t.rr_ratio|float if t.rr_ratio else 0 %}
+              <tr class="trade-row"
+                  data-symbol="{{ t.symbol }}"
+                  data-status="{{ t.status }}"
+                  onclick="showDetail('{{ t.trade_id }}')">
+                <td><code class="text-info">{{ t.trade_id }}</code></td>
+                <td class="text-muted small">{{ t.entry_time[:16] if t.entry_time else '-' }}</td>
+                <td><strong>{{ t.symbol }}</strong></td>
+                <td>
+                  <span class="badge rounded-pill {{ 'badge-long' if t.side == 'long' else 'badge-short' }}">
+                    {{ '▲ L' if t.side == 'long' else '▼ S' }}
+                  </span>
+                </td>
+                <td><span class="badge bg-secondary">{{ t.leverage }}x</span></td>
+                <td class="fw-semibold">{{ t.entry_price }}</td>
+
+                <!-- 목표가 (TP) - 강조 표시 -->
+                <td>
+                  <span class="pnl-pos fw-semibold">{{ t.take_profit }}</span>
+                  {% if t.tp_pct %}
+                    <br><small class="text-muted">+{{ t.tp_pct }}%</small>
+                  {% endif %}
+                </td>
+
+                <!-- 손절가 (SL) -->
+                <td>
+                  <span class="pnl-neg fw-semibold">{{ t.stop_loss }}</span>
+                  {% if t.sl_pct %}
+                    <br><small class="text-muted">-{{ t.sl_pct }}%</small>
+                  {% endif %}
+                </td>
+
+                <td>{{ t.exit_price if t.exit_price and t.exit_price != '0.0' else '—' }}</td>
+                <td class="{{ 'pnl-pos' if pnl > 0 else 'pnl-neg' if pnl < 0 else '' }}">
+                  {{ '{:+.4f}'.format(pnl) if t.status == 'CLOSED' else '—' }}
+                </td>
+                <td class="{{ 'pnl-pos' if pnl > 0 else 'pnl-neg' if pnl < 0 else '' }}">
+                  {{ '{:+.2f}%'.format(t.pnl_pct|float) if t.status == 'CLOSED' else '—' }}
+                </td>
+                <td class="text-center">
+                  {% if rr > 0 %}<span class="fw-semibold">1:{{ t.rr_ratio }}</span>{% else %}—{% endif %}
+                </td>
+                <td>
+                  {% if t.exit_reason == 'TP' %}
+                    <span class="badge badge-tp">TP 익절</span>
+                  {% elif t.exit_reason == 'SL' %}
+                    <span class="badge badge-sl">SL 손절</span>
+                  {% elif t.exit_reason %}
+                    <span class="badge badge-manual">{{ t.exit_reason }}</span>
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+                <td><span class="wave-badge">{{ t.wave_position or '—' }}</span></td>
+                <td>
+                  {% if t.prg_confirmed in ('True', True) %}
+                    <span class="prg-badge">PRG</span>
+                  {% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td>
+                  {% if t.rsi_confirmed in ('True', True) %}
+                    <span class="rsi-badge">RSI</span>
+                  {% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td>
+                  <span class="{{ 'pnl-pos' if conf >= 0.7 else 'pnl-neg' if conf < 0.55 else '' }}">
+                    {{ (conf * 100)|int }}%
+                  </span>
+                </td>
+                <td>
+                  {% if t.status == 'OPEN' %}
+                    <span class="badge badge-open">OPEN</span>
+                  {% else %}
+                    <span class="badge bg-secondary">CLOSED</span>
+                  {% endif %}
+                </td>
+
+                <!-- 매매 사유 (한 줄 요약, 마우스 오버 시 전체) -->
+                <td style="max-width:280px">
+                  <span class="small" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                        title="{{ t.reason_short or t.entry_reason }}">
+                    {{ t.reason_short or t.entry_reason or '—' }}
+                  </span>
+                </td>
+
+                <td>
+                  <button class="btn btn-sm btn-outline-info py-0 px-2"
+                          onclick="event.stopPropagation(); showDetail('{{ t.trade_id }}')">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 실시간 봇 로그 -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="d-flex align-items-center gap-2">
+            <span class="fw-bold" style="color:var(--green)">
+              <i class="bi bi-terminal me-1"></i>실시간 봇 로그
+            </span>
+            <span id="logStatusDot" class="live-dot log-dot-run" title="연결 상태"></span>
+            <span id="logStatusText" class="text-muted small">연결 중...</span>
+          </div>
+          <div class="d-flex gap-2 align-items-center">
+            <div class="form-check form-switch mb-0 me-1">
+              <input class="form-check-input" type="checkbox" id="logAutoScroll" checked>
+              <label class="form-check-label small text-muted" for="logAutoScroll">자동 스크롤</label>
+            </div>
+            <select id="logFilter" class="form-select form-select-sm"
+                    style="width:110px;background:var(--bg-dark);color:var(--text-main);border-color:var(--border)"
+                    onchange="applyLogFilter()">
+              <option value="">전체</option>
+              <option value="INFO">INFO</option>
+              <option value="WARNING">경고</option>
+              <option value="ERROR">오류</option>
+              <option value="신호">신호</option>
+              <option value="스캔">스캔</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </div>
+        <div id="logViewer"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 상세 모달 -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalTitle">매매 상세</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- 목표가/손절가 강조 배너 -->
+        <div class="row g-2 mb-3" id="d_price_banner">
+          <div class="col-4">
+            <div class="text-center p-3 rounded" style="background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.3)">
+              <div class="small text-muted mb-1">진입가</div>
+              <div class="fs-5 fw-bold" id="b_entry">—</div>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="text-center p-3 rounded" style="background:rgba(63,185,80,.18);border:1px solid rgba(63,185,80,.5)">
+              <div class="small text-muted mb-1">🎯 목표가 (TP)</div>
+              <div class="fs-4 fw-bold pnl-pos" id="b_tp">—</div>
+              <div class="small pnl-pos" id="b_tp_sub">—</div>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="text-center p-3 rounded" style="background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.3)">
+              <div class="small text-muted mb-1">🛑 손절가 (SL)</div>
+              <div class="fs-4 fw-bold pnl-neg" id="b_sl">—</div>
+              <div class="small pnl-neg" id="b_sl_sub">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 가격 정보 표 -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <div class="card-inner p-3">
+              <div class="small text-muted mb-2 fw-semibold">가격 상세</div>
+              <table class="table table-dark table-sm price-table mb-0">
+                <tr><td>진입가</td><td id="d_entry" class="fw-bold">—</td></tr>
+                <tr><td>목표가 (TP)</td><td id="d_tp" class="pnl-pos fw-bold">—</td></tr>
+                <tr><td>손절가 (SL)</td><td id="d_sl" class="pnl-neg fw-bold">—</td></tr>
+                <tr><td>청산가</td><td id="d_exit">—</td></tr>
+                <tr><td>손익비</td><td id="d_rr" class="fw-bold">—</td></tr>
+                <tr><td>TP 거리</td><td id="d_tp_pct" class="pnl-pos">—</td></tr>
+                <tr><td>SL 거리</td><td id="d_sl_pct" class="pnl-neg">—</td></tr>
+              </table>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card-inner p-3">
+              <div class="small text-muted mb-2 fw-semibold">포지션 정보</div>
+              <table class="table table-dark table-sm price-table mb-0">
+                <tr><td>코인</td><td id="d_symbol" class="fw-bold">—</td></tr>
+                <tr><td>방향</td><td id="d_side">—</td></tr>
+                <tr><td>레버리지</td><td id="d_lev">—</td></tr>
+                <tr><td>수량</td><td id="d_qty">—</td></tr>
+                <tr><td>파동 유형</td><td id="d_wave_type">—</td></tr>
+                <tr><td>파동 위치</td><td id="d_wave_pos">—</td></tr>
+                <tr><td>신뢰도</td><td id="d_conf">—</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 신호 품질 배지 -->
+        <div class="d-flex gap-2 mb-3" id="d_badges"></div>
+
+        <!-- PnL (청산 시) -->
+        <div id="d_pnl_section" class="card-inner p-3 mb-3" style="display:none!important">
+          <div class="small text-muted mb-1 fw-semibold">손익 결과</div>
+          <div class="d-flex gap-4">
+            <div><span class="text-muted small">PnL(USDT)</span><br><span id="d_pnl_u" class="fs-5 fw-bold">—</span></div>
+            <div><span class="text-muted small">PnL(%)</span><br><span id="d_pnl_p" class="fs-5 fw-bold">—</span></div>
+            <div><span class="text-muted small">청산 사유</span><br><span id="d_exit_r" class="fs-5 fw-bold">—</span></div>
+          </div>
+        </div>
+
+        <!-- 진입 근거 전문 -->
+        <div class="small text-muted mb-2 fw-semibold">
+          <i class="bi bi-file-text me-1"></i>진입 근거 전문
+        </div>
+        <div class="reason-box" id="d_reason">—</div>
+
+      </div>
+      <div class="modal-footer">
+        <span class="text-muted small" id="d_times"></span>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 지침서 모달 -->
+<div class="modal fade" id="guidebookModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-book text-warning me-2"></i>
+          글렌 닐리 & 소모닉 완벽 통합 초정밀 자동매매 알고리즘 백서
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <!-- 검색 -->
+        <div class="input-group mb-3">
+          <span class="input-group-text" style="background:#21262d;border-color:var(--border)">
+            <i class="bi bi-search text-muted"></i>
+          </span>
+          <input type="text" id="gbSearch" class="form-control"
+                 placeholder="지침서 내 검색..."
+                 style="background:#21262d;border-color:var(--border);color:var(--text-main)"
+                 oninput="searchGuidebook(this.value)">
+          <button class="btn btn-outline-secondary btn-sm" onclick="clearSearch()">초기화</button>
+        </div>
+
+        <!-- 목차 -->
+        <div class="guidebook-toc" id="gbToc" style="display:none">
+          <div class="small text-muted fw-semibold mb-2"><i class="bi bi-list-ul me-1"></i>목차</div>
+          <div id="gbTocList"></div>
+        </div>
+
+        <!-- 본문 -->
+        <div class="guidebook-body" id="gbBody">
+          <div class="text-center text-muted py-5">
+            <div class="spinner-border spinner-border-sm me-2"></div>불러오는 중...
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <span class="text-muted small" id="gbMatchCount"></span>
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">닫기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function _detailModal() {
+  return bootstrap.Modal.getOrCreateInstance(document.getElementById('detailModal'));
+}
+
+async function showDetail(tradeId) {
+  try {
+    const res  = await fetch(`/api/detail/${tradeId}`);
+    const data = await res.json();
+    if (!Object.keys(data).length) { alert('상세 정보 없음'); return; }
+
+    document.getElementById('modalTitle').textContent =
+      `${data.trade_id || ''} | ${data.symbol || ''} ${(data.side||'').toUpperCase()}`;
+
+    // 배너 (목표가/손절가 강조)
+    document.getElementById('b_entry').textContent = data.entry_price || '—';
+    document.getElementById('b_tp').textContent    = data.take_profit || '—';
+    document.getElementById('b_tp_sub').textContent = data.tp_pct
+      ? `+${data.tp_pct}%  ·  RR 1:${data.rr_ratio}` : '—';
+    document.getElementById('b_sl').textContent    = data.stop_loss || '—';
+    document.getElementById('b_sl_sub').textContent = data.sl_pct ? `-${data.sl_pct}%` : '—';
+
+    // 가격 정보 표
+    document.getElementById('d_entry').textContent = data.entry_price || '—';
+    document.getElementById('d_tp').textContent    = data.take_profit
+      ? `${data.take_profit}  (+${data.tp_pct || '?'}%)`  : '—';
+    document.getElementById('d_sl').textContent    = data.stop_loss
+      ? `${data.stop_loss}  (-${data.sl_pct || '?'}%)` : '—';
+    document.getElementById('d_exit').textContent  = data.exit_price || '—';
+    document.getElementById('d_rr').textContent    = data.rr_ratio ? `1 : ${data.rr_ratio}` : '—';
+    document.getElementById('d_tp_pct').textContent = data.tp_pct ? `+${data.tp_pct}%` : '—';
+    document.getElementById('d_sl_pct').textContent = data.sl_pct ? `-${data.sl_pct}%` : '—';
+
+    // 포지션 정보
+    document.getElementById('d_symbol').textContent    = data.symbol || '—';
+    document.getElementById('d_side').innerHTML        = data.side === 'long'
+      ? '<span style="color:var(--green)">▲ LONG</span>'
+      : '<span style="color:var(--red)">▼ SHORT</span>';
+    document.getElementById('d_lev').textContent       = data.leverage ? `${data.leverage}x` : '—';
+    document.getElementById('d_qty').textContent       = data.quantity || '—';
+    document.getElementById('d_wave_type').textContent = data.wave_type || '—';
+    document.getElementById('d_wave_pos').textContent  = data.wave_position || '—';
+    document.getElementById('d_conf').textContent      = data.confidence
+      ? `${Math.round(data.confidence * 100)}%` : '—';
+
+    // 배지
+    const badges = document.getElementById('d_badges');
+    badges.innerHTML = '';
+    if (data.prg_confirmed === true || data.prg_confirmed === 'True')
+      badges.innerHTML += '<span class="prg-badge fs-6">⚡ PRG 피보나치 중첩</span>';
+    if (data.rsi_confirmed === true || data.rsi_confirmed === 'True')
+      badges.innerHTML += '<span class="rsi-badge fs-6">📊 RSI 다이버전스</span>';
+    if ((data.prg_confirmed === true || data.prg_confirmed === 'True') &&
+        (data.rsi_confirmed === true || data.rsi_confirmed === 'True'))
+      badges.innerHTML += '<span class="wave-badge fs-6">🔥 10x 레버리지 구간</span>';
+
+    // PnL
+    const pnlSec = document.getElementById('d_pnl_section');
+    if (data.exit_price) {
+      pnlSec.style.removeProperty('display');
+      const pnlU = parseFloat(data.pnl_usdt || 0);
+      const pnlP = parseFloat(data.pnl_pct  || 0);
+      document.getElementById('d_pnl_u').textContent  = `${pnlU >= 0 ? '+' : ''}${pnlU.toFixed(4)} USDT`;
+      document.getElementById('d_pnl_u').className    = pnlU >= 0 ? 'fs-5 fw-bold pnl-pos' : 'fs-5 fw-bold pnl-neg';
+      document.getElementById('d_pnl_p').textContent  = `${pnlP >= 0 ? '+' : ''}${pnlP.toFixed(2)}%`;
+      document.getElementById('d_pnl_p').className    = pnlP >= 0 ? 'fs-5 fw-bold pnl-pos' : 'fs-5 fw-bold pnl-neg';
+      document.getElementById('d_exit_r').textContent = data.exit_reason || '—';
+    } else {
+      pnlSec.style.display = 'none';
+    }
+
+    // 진입 근거 전문
+    document.getElementById('d_reason').textContent = data.entry_reason || '진입 근거 없음';
+
+    // 시간
+    document.getElementById('d_times').textContent =
+      `진입: ${data.entry_time || '—'}  |  청산: ${data.exit_time || '—'}`;
+
+    _detailModal().show();
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+// 테이블 필터
+function filterTable() {
+  const kw     = document.getElementById('searchInput').value.toLowerCase();
+  const status = document.getElementById('statusFilter').value;
+  document.querySelectorAll('.trade-row').forEach(row => {
+    const sym  = (row.dataset.symbol || '').toLowerCase();
+    const stat = row.dataset.status || '';
+    const show = sym.includes(kw) && (status === '' || stat === status);
+    row.style.display = show ? '' : 'none';
+  });
+}
+
+
+// ─── 지침서 기능 ─────────────────────────────────────────────
+function _gbModal() {
+  return bootstrap.Modal.getOrCreateInstance(document.getElementById('guidebookModal'));
+}
+let gbRawContent = '';
+let gbRenderedHtml = '';
+
+async function openGuidebook() {
+  _gbModal().show();
+  if (gbRawContent) return;   // 이미 로드됨
+
+  try {
+    const res  = await fetch('/api/guidebook');
+    const data = await res.json();
+    gbRawContent = data.content;
+
+    // marked.js로 마크다운 → HTML 변환
+    // 지침서가 마크다운 형식이 아닐 경우 단락으로 변환
+    const processed = preprocessContent(gbRawContent);
+    gbRenderedHtml  = marked.parse(processed);
+
+    document.getElementById('gbBody').innerHTML = gbRenderedHtml;
+    buildToc();
+
+  } catch(e) {
+    document.getElementById('gbBody').innerHTML =
+      '<div class="text-danger">지침서 로드 실패: ' + e + '</div>';
+  }
+}
+
+function preprocessContent(text) {
+  // 지침서 특수 기호를 마크다운 헤딩으로 변환
+  return text
+    .replace(/⚙️ 엔진 (\d+): /g, '\n## ⚙️ 엔진 $1: ')
+    .replace(/💡 /g, '\n## 💡 ')
+    .replace(/(\d+\. )(추세적|터미널|표준|복합)/g, '\n### $1$2')
+    .replace(/^([A-Z가-힣].{0,30}):$/gm, '\n**$1**')
+    .split('').join('');   // 문자열 그대로
+}
+
+function buildToc() {
+  const body     = document.getElementById('gbBody');
+  const headings = body.querySelectorAll('h1, h2, h3');
+  if (headings.length === 0) {
+    document.getElementById('gbToc').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('gbToc').style.display = '';
+  const tocList = document.getElementById('gbTocList');
+  tocList.innerHTML = '';
+
+  headings.forEach((h, i) => {
+    const id  = `gb-h-${i}`;
+    h.id      = id;
+    const indent = h.tagName === 'H3' ? 'ms-3' : h.tagName === 'H2' ? 'ms-1' : '';
+    const a   = document.createElement('a');
+    a.href    = `#${id}`;
+    a.className = indent;
+    a.textContent = h.textContent;
+    a.onclick = (e) => {
+      e.preventDefault();
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    tocList.appendChild(a);
+  });
+}
+
+function searchGuidebook(keyword) {
+  const body = document.getElementById('gbBody');
+  if (!keyword.trim()) {
+    body.innerHTML = gbRenderedHtml;
+    buildToc();
+    document.getElementById('gbMatchCount').textContent = '';
+    return;
+  }
+
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex   = new RegExp(`(${escaped})`, 'gi');
+  const highlighted = gbRenderedHtml.replace(regex,
+    '<mark class="search-highlight">$1</mark>');
+  body.innerHTML = highlighted;
+
+  const matches = body.querySelectorAll('mark.search-highlight').length;
+  document.getElementById('gbMatchCount').textContent =
+    matches > 0 ? `"${keyword}" ${matches}건 일치` : '일치 없음';
+
+  // 첫 번째 결과로 스크롤
+  const first = body.querySelector('mark.search-highlight');
+  if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function clearSearch() {
+  document.getElementById('gbSearch').value = '';
+  searchGuidebook('');
+}
+
+// ─── 지침서 편집 ──────────────────────────────────────────────
+function _gbEditModal() {
+  return bootstrap.Modal.getOrCreateInstance(document.getElementById('guidebookEditModal'));
+}
+
+async function openGuidebookEdit() {
+  _gbEditModal().show();
+  const ta = document.getElementById('gbEditTextarea');
+  ta.value = '로딩 중...';
+  try {
+    const res  = await fetch('/api/guidebook');
+    const data = await res.json();
+    ta.value = data.content || '';
+  } catch(e) {
+    ta.value = '로드 실패: ' + e;
+  }
+}
+
+async function saveGuidebook() {
+  const content = document.getElementById('gbEditTextarea').value;
+  const btn = document.getElementById('gbEditSaveBtn');
+  btn.disabled = true; btn.textContent = '저장 중...';
+  try {
+    const res  = await fetch('/api/guidebook/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('지침서 저장 완료 — 봇에 즉시 반영됩니다', 'success');
+      gbRawContent = '';   // 열람 모달 캐시 초기화
+      _gbEditModal().hide();
+    } else {
+      showToast('저장 실패: ' + data.msg, 'danger');
+    }
+  } catch(e) {
+    showToast('저장 실패: ' + e, 'danger');
+  } finally {
+    btn.disabled = false; btn.textContent = '저장';
+  }
+}
+
+// ─── 파라미터 편집기 ──────────────────────────────────────────
+function _paramsModal() {
+  return bootstrap.Modal.getOrCreateInstance(document.getElementById('paramsModal'));
+}
+let paramsData = {};
+
+async function openParamsEditor() {
+  _paramsModal().show();
+  try {
+    const res = await fetch('/api/rules');
+    paramsData = await res.json();
+    renderParams(paramsData);
+  } catch(e) {
+    document.getElementById('paramsBody').innerHTML =
+      '<div class="text-danger">로드 실패: ' + e + '</div>';
+  }
+}
+
+function renderParams(data) {
+  const body = document.getElementById('paramsBody');
+  body.innerHTML = '';
+
+  const skip = (k) => k.startsWith('_');
+
+  Object.entries(data).forEach(([section, val]) => {
+    if (skip(section) || typeof val !== 'object' || Array.isArray(val)) return;
+
+    const card = document.createElement('div');
+    card.className = 'mb-3 p-3 card-inner rounded';
+
+    let notes = {};
+    let fields = {};
+    Object.entries(val).forEach(([k, v]) => {
+      if (k.startsWith('_note')) { notes[k.replace('_note_','')] = v; }
+      else if (!skip(k)) { fields[k] = v; }
+    });
+
+    let html = `<div class="fw-bold mb-2" style="color:var(--orange)">${section}</div>`;
+    Object.entries(fields).forEach(([k, v]) => {
+      const noteKey = k.replace(section + '_', '');
+      const note = notes[noteKey] || notes[k] || '';
+      const inputId = `param__${section}__${k}`;
+      const displayVal = Array.isArray(v) ? v.join(', ') : v;
+      const inputType  = typeof v === 'boolean' ? 'checkbox' : 'text';
+
+      if (inputType === 'checkbox') {
+        html += `
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <input type="checkbox" class="form-check-input param-field" id="${inputId}"
+              data-section="${section}" data-key="${k}" ${v ? 'checked' : ''}>
+            <label for="${inputId}" class="mb-0 text-muted small">${k}</label>
+            ${note ? `<span class="text-muted" style="font-size:.75rem">— ${note}</span>` : ''}
+          </div>`;
+      } else {
+        html += `
+          <div class="mb-2">
+            <label class="form-label mb-1 text-muted small">${k}
+              ${note ? `<span style="color:var(--purple);font-size:.72rem">  — ${note}</span>` : ''}
+            </label>
+            <input type="text" class="form-control form-control-sm param-field"
+              id="${inputId}" data-section="${section}" data-key="${k}"
+              value="${displayVal}"
+              style="background:var(--bg-dark);color:var(--text-main);border-color:var(--border)">
+          </div>`;
+      }
+    });
+    card.innerHTML = html;
+    body.appendChild(card);
+  });
+}
+
+async function saveParams() {
+  // 입력값 수집
+  document.querySelectorAll('.param-field').forEach(el => {
+    const section = el.dataset.section;
+    const key     = el.dataset.key;
+    const orig    = paramsData[section]?.[key];
+
+    let newVal;
+    if (el.type === 'checkbox') {
+      newVal = el.checked;
+    } else {
+      const raw = el.value.trim();
+      if (Array.isArray(orig)) {
+        newVal = raw.split(',').map(x => parseFloat(x.trim())).filter(x => !isNaN(x));
+      } else if (typeof orig === 'number') {
+        newVal = parseFloat(raw);
+        if (isNaN(newVal)) newVal = orig;
+      } else {
+        newVal = raw;
+      }
+    }
+    if (paramsData[section]) paramsData[section][key] = newVal;
+  });
+
+  const btn = document.getElementById('paramsSaveBtn');
+  btn.disabled = true; btn.textContent = '저장 중...';
+  try {
+    const res  = await fetch('/api/rules/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(paramsData)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('파라미터 저장 완료 — 봇에 즉시 반영됩니다', 'success');
+      _paramsModal().hide();
+    } else {
+      showToast('저장 실패: ' + data.msg, 'danger');
+    }
+  } catch(e) {
+    showToast('저장 실패: ' + e, 'danger');
+  } finally {
+    btn.disabled = false; btn.textContent = '저장';
+  }
+}
+
+// ─── 공통 토스트 ──────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('liveToast');
+  const tb = document.getElementById('toastBody');
+  t.className = `toast align-items-center text-bg-${type} border-0`;
+  tb.textContent = msg;
+  bootstrap.Toast.getOrCreateInstance(t, { delay: 4000 }).show();
+}
+
+// ─── 실시간 로그 뷰어 (폴링) ─────────────────────────────────
+let logLines  = [];
+let logOffset = 0;
+let logFilter = '';
+let logTimer  = null;
+
+function _logClass(line) {
+  if (/\[ERROR\]/.test(line))   return 'log-error';
+  if (/\[WARNING\]/.test(line)) return 'log-warn';
+  if (/신호|LONG|SHORT|진입|체결/.test(line)) return 'log-signal';
+  return 'log-info';
+}
+function _esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function appendLogLine(line) {
+  if (!line.trim()) return;
+  logLines.push(line);
+  if (logLines.length > 2000) logLines.shift();
+  const kw = logFilter;
+  if (kw && !line.includes(kw)) return;
+  const viewer = document.getElementById('logViewer');
+  if (!viewer) return;
+  const ts   = line.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+  const rest = ts ? line.slice(ts[0].length) : line;
+  const div  = document.createElement('div');
+  div.className = _logClass(line);
+  div.innerHTML = (ts ? `<span class="log-ts">${ts[0]}</span>` : '') + _esc(rest);
+  viewer.appendChild(div);
+  while (viewer.children.length > 500) viewer.removeChild(viewer.firstChild);
+  const chk = document.getElementById('logAutoScroll');
+  if (!chk || chk.checked) viewer.scrollTop = viewer.scrollHeight;
+}
+function renderAllLog() {
+  const viewer = document.getElementById('logViewer');
+  if (!viewer) return;
+  const kw = logFilter;
+  const filtered = kw ? logLines.filter(l => l.includes(kw)) : logLines;
+  viewer.innerHTML = filtered.slice(-500).map(line => {
+    const ts   = line.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    const rest = ts ? line.slice(ts[0].length) : line;
+    return `<div class="${_logClass(line)}">${ts ? `<span class="log-ts">${ts[0]}</span>` : ''}${_esc(rest)}</div>`;
+  }).join('');
+  const chk = document.getElementById('logAutoScroll');
+  if (!chk || chk.checked) viewer.scrollTop = viewer.scrollHeight;
+}
+function applyLogFilter() {
+  logFilter = document.getElementById('logFilter').value;
+  renderAllLog();
+}
+function clearLog() {
+  logLines = [];
+  const viewer = document.getElementById('logViewer');
+  if (viewer) viewer.innerHTML = '';
+}
+async function pollLog() {
+  try {
+    const url = logOffset > 0 ? `/api/logs?offset=${logOffset}` : '/api/logs?n=200';
+    const res  = await fetch(url);
+    const data = await res.json();
+    const dot  = document.getElementById('logStatusDot');
+    const txt  = document.getElementById('logStatusText');
+    if (dot) dot.style.background = 'var(--green)';
+    if (txt) txt.textContent = '봇 연결됨';
+    if (data.lines && data.lines.length > 0) {
+      data.lines.forEach(appendLogLine);
+      logOffset = data.total;
+    } else if (logOffset === 0) {
+      logOffset = data.total || 0;
+    }
+  } catch(e) {
+    const dot = document.getElementById('logStatusDot');
+    const txt = document.getElementById('logStatusText');
+    if (dot) dot.style.background = 'var(--red)';
+    if (txt) txt.textContent = '연결 끊김';
+  }
+}
+function initLog() {
+  pollLog();
+  if (logTimer) clearInterval(logTimer);
+  logTimer = setInterval(pollLog, 3000);
+}
+window.addEventListener('DOMContentLoaded', initLog);
+</script>
+
+<!-- 지침서 편집 모달 -->
+<div class="modal fade" id="guidebookEditModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil-square me-2 text-info"></i>지침서 편집</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="alert alert-info py-2 small mb-3">
+          <i class="bi bi-info-circle me-1"></i>
+          저장 후 봇이 다음 스캔 시 자동으로 반영합니다. Markdown 형식으로 작성하세요.
+        </div>
+        <textarea id="gbEditTextarea" class="form-control font-monospace"
+          style="height:65vh;background:var(--bg-dark);color:var(--text-main);
+                 border-color:var(--border);font-size:.82rem;resize:vertical;line-height:1.65"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-info" id="gbEditSaveBtn" onclick="saveGuidebook()">
+          <i class="bi bi-save me-1"></i>저장
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 파라미터 편집 모달 -->
+<div class="modal fade" id="paramsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-sliders me-2 text-warning"></i>매매 파라미터 편집</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-3" style="max-height:75vh;overflow-y:auto">
+        <div class="alert alert-warning py-2 small mb-3">
+          <i class="bi bi-lightning-charge me-1"></i>
+          저장 즉시 봇 파라미터에 반영됩니다. 숫자 배열은 쉼표로 구분하세요.
+        </div>
+        <div id="paramsBody"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-warning" id="paramsSaveBtn" onclick="saveParams()">
+          <i class="bi bi-save me-1"></i>저장
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 토스트 알림 -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="liveToast" class="toast align-items-center text-bg-success border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastBody"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
