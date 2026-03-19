@@ -200,7 +200,7 @@ def _run_bot():
         get_current_price,
     )
     from signal_generator import generate_signal
-    from trader import execute_trade, check_trailing_stop, update_stop_loss, adjust_sl_after_tp1
+    from trader import execute_trade, check_trailing_stop, update_stop_loss, adjust_sl_after_tp1, check_pending_limit
     from journal import print_stats, get_open_trades, update_stats
 
     with bot_state_lock:
@@ -286,8 +286,31 @@ def _run_bot():
                 if symbol in self.positions:
                     self.positions[symbol]["remaining_qty"] = qty
 
-    cooldown_mgr = CooldownManager()
-    pos_tracker  = PositionTracker()
+    class PendingOrderTracker:
+        """지정가 미체결 주문 추적"""
+        def __init__(self):
+            self.orders = {}   # symbol → {order_id, limit_price, quantity, tp1_qty, tp2_qty, placed_at, signal}
+            self._lock  = threading.Lock()
+
+        def add(self, symbol, pending: dict, signal):
+            with self._lock:
+                self.orders[symbol] = {**pending, "signal": signal}
+
+        def remove(self, symbol):
+            with self._lock:
+                self.orders.pop(symbol, None)
+
+        def get_all(self):
+            with self._lock:
+                return dict(self.orders)
+
+        def has(self, symbol):
+            with self._lock:
+                return symbol in self.orders
+
+    cooldown_mgr  = CooldownManager()
+    pos_tracker   = PositionTracker()
+    pending_tracker = PendingOrderTracker()
 
     def _get_pos_qty(exch, sym):
         try:
@@ -448,9 +471,33 @@ def _run_bot():
             sync_positions(exchange)
             monitor_positions(exchange)
 
+            # ── 지정가 미체결 주문 체결 확인 ────────────────────
+            for sym, pend in list(pending_tracker.get_all().items()):
+                sig = pend.pop("signal")
+                result = check_pending_limit(
+                    exchange, sym, pend, sig, cooldown_mgr.cooldowns
+                )
+                if result.get("cancelled"):
+                    pending_tracker.remove(sym)
+                    logger.info(f"[{sym}] 지정가 주문 취소됨")
+                elif not result.get("pending"):
+                    # 체결 완료 → pos_tracker에 등록
+                    pending_tracker.remove(sym)
+                    pos_tracker.add(
+                        sym, sig.side,
+                        result["actual_entry"], result["actual_sl"],
+                        result["quantity"], result["tp1_qty"], result["tp2_qty"],
+                        sig.atr_pct, result["trade_id"],
+                    )
+                else:
+                    # 아직 미체결 → signal 다시 넣기
+                    pend["signal"] = sig
+
             signals = []
             for symbol in SYMBOLS:
                 if not cooldown_mgr.is_cooled_down(symbol):
+                    continue
+                if pending_tracker.has(symbol):   # 지정가 대기 중 → 스킵
                     continue
                 try:
                     all_tf = fetch_all_timeframes(exchange, symbol)
@@ -478,7 +525,12 @@ def _run_bot():
                     open_positions=open_pos,
                     cooldown_tracker=cooldown_mgr.cooldowns,
                 )
-                if res:
+                if res.get("pending"):
+                    # 지정가 주문 대기 중 → pending_tracker에 등록
+                    pending_tracker.add(sig.symbol, res, sig)
+                    cooldown_mgr.set_cooldown(sig.symbol, R.entry_cooldown_sec)
+                elif res:
+                    # 즉시 체결 (시장가 or 지정가 즉시 체결)
                     pos_tracker.add(
                         sig.symbol, sig.side,
                         res["actual_entry"], res["actual_sl"],

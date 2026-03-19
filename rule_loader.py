@@ -291,6 +291,20 @@ class RuleLoader:
     def max_total_exposure_pct(self) -> float:
         return self.get("스캔.max_total_exposure_pct", 0.50)
 
+    # ── 지정가 진입 ────────────────────────────────────────────
+
+    @property
+    def limit_entry_enabled(self) -> bool:
+        return self.get("지정가_진입.enabled", True)
+
+    @property
+    def limit_offset_pct(self) -> float:
+        return self.get("지정가_진입.limit_offset_pct", 0.0008)
+
+    @property
+    def limit_timeout_sec(self) -> int:
+        return int(self.get("지정가_진입.timeout_sec", 90))
+
     # ── 파동 피보나치 리스트 ──────────────────────────────────────
 
     def wave2_retracement(self) -> list:

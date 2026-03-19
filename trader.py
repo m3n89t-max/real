@@ -39,6 +39,9 @@ def _place_order(exchange, symbol, side, order_type, quantity, price=None, param
         if order_type == "market":
             order = exchange.create_order(symbol, "market", order_side, quantity, None, params)
 
+        elif order_type == "limit":
+            order = exchange.create_order(symbol, "limit", order_side, quantity, price, params)
+
         elif order_type == "stop_market":
             params["stopPrice"] = price
             order = exchange.create_order(symbol, "stop_market", close_side, quantity, None, params)
@@ -146,66 +149,101 @@ def execute_trade(
         tp1_qty = quantity
         tp2_qty = 0
 
-    # ─── 7. 주문 실행 ────────────────────────────────────────────
+    # ─── 7. 지정가 계산 ──────────────────────────────────────────
     sl_pct_display = abs(signal.entry_price - signal.stop_loss) / signal.entry_price * 100
     tp_pct_display = abs(signal.entry_price - signal.take_profit) / signal.entry_price * 100
 
+    if R.limit_entry_enabled:
+        # 현재가 대비 유리한 방향으로 limit_offset_pct 적용
+        if signal.side == "long":
+            limit_price = round(signal.entry_price * (1 - R.limit_offset_pct), 8)
+        else:
+            limit_price = round(signal.entry_price * (1 + R.limit_offset_pct), 8)
+        order_type_str = "limit"
+    else:
+        limit_price    = None
+        order_type_str = "market"
+
     logger.info(
         f"\n{'='*55}\n"
-        f"[{symbol}] 주문 실행 (v3.1)\n"
+        f"[{symbol}] 주문 실행 (지정가모드={R.limit_entry_enabled})\n"
         f"  방향    : {signal.side.upper()}\n"
         f"  레버리지: {signal.leverage}x\n"
-        f"  진입가  : {signal.entry_price:.4f} USDT\n"
-        f"  손절가  : {signal.stop_loss:.4f} USDT (-{sl_pct_display:.2f}% ATR기반)\n"
+        f"  진입가  : {limit_price or signal.entry_price:.4f} USDT\n"
+        f"  손절가  : {signal.stop_loss:.4f} USDT (-{sl_pct_display:.2f}%)\n"
         f"  목표가  : {signal.take_profit:.4f} USDT (+{tp_pct_display:.2f}%)\n"
         f"  수량    : {quantity} (TP1:{tp1_qty} / TP2:{tp2_qty})\n"
-        f"  잔고    : {balance:.2f} USDT\n"
-        f"  ATR%    : {signal.atr_pct:.3%}\n"
+        f"  잔고    : {balance:.2f} USDT | ATR%:{signal.atr_pct:.3%}\n"
         f"{'='*55}"
     )
 
-    entry_order = _place_order(exchange, symbol, signal.side, "market", quantity)
+    entry_order = _place_order(exchange, symbol, signal.side, order_type_str, quantity, limit_price)
     if not entry_order:
         return {}
 
-    time.sleep(1)
+    order_id = entry_order.get("id", "")
 
-    try:
+    # ─── 지정가: 미체결 상태로 반환 (pending) ────────────────────
+    if R.limit_entry_enabled:
+        status = entry_order.get("status", "open")
+        if status not in ("closed", "filled"):
+            logger.info(
+                f"[{symbol}] 지정가 주문 대기 중 | "
+                f"order_id={order_id} limit={limit_price:.4f} "
+                f"timeout={R.limit_timeout_sec}s"
+            )
+            return {
+                "pending"    : True,
+                "order_id"   : order_id,
+                "limit_price": limit_price,
+                "quantity"   : quantity,
+                "tp1_qty"    : tp1_qty,
+                "tp2_qty"    : tp2_qty,
+                "placed_at"  : time.time(),
+            }
+        # 즉시 체결된 경우
+        actual_entry = float(entry_order.get("average", limit_price) or limit_price)
+    else:
+        time.sleep(1)
         actual_entry = float(entry_order.get("average", signal.entry_price) or signal.entry_price)
-    except Exception:
-        actual_entry = signal.entry_price
 
     if actual_entry <= 0:
         actual_entry = signal.entry_price
 
-    # 체결가 기준 SL/TP 재계산
+    return _place_sl_tp_and_record(
+        exchange, symbol, signal, actual_entry,
+        quantity, tp1_qty, tp2_qty, cooldown_tracker
+    )
+
+
+def _place_sl_tp_and_record(
+    exchange, symbol: str, signal,
+    actual_entry: float, quantity: float,
+    tp1_qty: float, tp2_qty: float,
+    cooldown_tracker,
+) -> dict:
+    """체결 후 SL/TP 주문 배치 및 저널 기록 (지정가/시장가 공통)"""
     sl_pct = abs(signal.entry_price - signal.stop_loss) / signal.entry_price
-    risk_dist = abs(actual_entry - actual_sl if actual_entry > 0 else signal.entry_price * sl_pct)
 
     if signal.side == "long":
         actual_sl  = round(actual_entry * (1 - sl_pct), 8)
         risk_dist  = actual_entry - actual_sl
-        actual_tp1 = round(actual_entry + risk_dist * R.tp1_rr, 8)   # RR 0.7
-        actual_tp2 = round(actual_entry + risk_dist * R.tp2_rr, 8)   # RR 1.5
+        actual_tp1 = round(actual_entry + risk_dist * R.tp1_rr, 8)
+        actual_tp2 = round(actual_entry + risk_dist * R.tp2_rr, 8)
     else:
         actual_sl  = round(actual_entry * (1 + sl_pct), 8)
         risk_dist  = actual_sl - actual_entry
-        actual_tp1 = round(actual_entry - risk_dist * R.tp1_rr, 8)   # RR 0.7
-        actual_tp2 = round(actual_entry - risk_dist * R.tp2_rr, 8)   # RR 1.5
+        actual_tp1 = round(actual_entry - risk_dist * R.tp1_rr, 8)
+        actual_tp2 = round(actual_entry - risk_dist * R.tp2_rr, 8)
 
-    # 손절 주문 (전체 수량)
     sl_order = _place_order(
         exchange, symbol, signal.side, "stop_market",
         quantity, actual_sl, {"reduceOnly": True}
     )
-
-    # TP1 주문 (50% 수량, 1차 목표가)
     tp1_order = _place_order(
         exchange, symbol, signal.side, "take_profit_market",
         tp1_qty, actual_tp1, {"reduceOnly": True}
     )
-
-    # TP2 주문 (나머지 수량, 2차 목표가 — 봇 종료 시 안전장치)
     tp2_order = {}
     if tp2_qty > 0:
         tp2_order = _place_order(
@@ -221,19 +259,17 @@ def execute_trade(
             f"TP1:{actual_tp1:.4f}({tp1_qty}){tp2_info}"
         )
         trade_id = record_entry(signal, quantity)
-
         if cooldown_tracker is not None:
             cooldown_tracker[symbol] = time.time() + R.entry_cooldown_sec
-
         return {
-            "trade_id": trade_id,
+            "trade_id"    : trade_id,
             "actual_entry": actual_entry,
-            "actual_sl": actual_sl,
-            "actual_tp1": actual_tp1,
-            "actual_tp2": actual_tp2,
-            "quantity": quantity,
-            "tp1_qty": tp1_qty,
-            "tp2_qty": tp2_qty,
+            "actual_sl"   : actual_sl,
+            "actual_tp1"  : actual_tp1,
+            "actual_tp2"  : actual_tp2,
+            "quantity"    : quantity,
+            "tp1_qty"     : tp1_qty,
+            "tp2_qty"     : tp2_qty,
         }
 
     # SL/TP 실패 → 긴급 청산
@@ -245,6 +281,54 @@ def execute_trade(
     except Exception as e:
         logger.critical(f"[{symbol}] 긴급 청산 실패! 수동 확인 필요: {e}")
     return {}
+
+
+def check_pending_limit(exchange, symbol: str, pending: dict, signal,
+                        cooldown_tracker) -> dict:
+    """
+    지정가 주문 체결 여부 확인.
+
+    Returns:
+        - 체결됨  : {trade_id, actual_entry, actual_sl, ...}
+        - 미체결  : {"pending": True}
+        - 타임아웃: {"cancelled": True}
+    """
+    order_id  = pending["order_id"]
+    placed_at = pending["placed_at"]
+    quantity  = pending["quantity"]
+    tp1_qty   = pending["tp1_qty"]
+    tp2_qty   = pending["tp2_qty"]
+
+    # 타임아웃 → 주문 취소
+    if time.time() - placed_at > R.limit_timeout_sec:
+        try:
+            exchange.cancel_order(order_id, symbol)
+            logger.info(f"[{symbol}] 지정가 주문 취소 (타임아웃 {R.limit_timeout_sec}s)")
+        except Exception as e:
+            logger.warning(f"[{symbol}] 주문 취소 실패(이미 처리됨?): {e}")
+        return {"cancelled": True}
+
+    # 체결 상태 조회
+    try:
+        order  = exchange.fetch_order(order_id, symbol)
+        status = order.get("status", "open")
+        filled = float(order.get("filled", 0) or 0)
+
+        if status in ("closed", "filled") or filled >= quantity * 0.99:
+            actual_entry = float(order.get("average", pending["limit_price"]) or pending["limit_price"])
+            logger.info(f"[{symbol}] 지정가 체결 확인 @ {actual_entry:.4f}")
+            return _place_sl_tp_and_record(
+                exchange, symbol, signal, actual_entry,
+                quantity, tp1_qty, tp2_qty, cooldown_tracker
+            )
+
+        remaining = int(R.limit_timeout_sec - (time.time() - placed_at))
+        logger.info(f"[{symbol}] 지정가 대기 중 (잔여 {remaining}s | filled={filled}/{quantity})")
+        return {"pending": True}
+
+    except Exception as e:
+        logger.error(f"[{symbol}] 주문 조회 실패: {e}")
+        return {"pending": True}
 
 
 def close_position(

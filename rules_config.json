@@ -113,5 +113,14 @@
     "max_open_positions": 2,
     "max_total_exposure_pct": 0.8,
     "_note_exp": "증거금 합계 ≤ 계좌의 80% (리스크 제한)"
+  },
+
+  "지정가_진입": {
+    "enabled": true,
+    "_note": "시장가 대신 지정가(limit) 주문으로 더 유리한 가격에 진입",
+    "limit_offset_pct": 0.0008,
+    "_note_offset": "현재가 대비 0.08% 유리한 방향으로 지정가 설정 (롱: 현재가-0.08%, 숏: 현재가+0.08%)",
+    "timeout_sec": 90,
+    "_note_timeout": "90초 내 미체결 시 주문 취소 (1.5분봉 기준)"
   }
 }
