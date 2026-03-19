@@ -1,25 +1,32 @@
 """
-바이낸스 선물 NEoWave + 지침서 자동매매 봇 v2.0
+바이낸스 선물 NEoWave + 지침서 자동매매 봇 v3.1
 
-타임프레임 계층: 4h → 1h → 15m → 5m(메인) → 1m(타점)
-레버리지: 4x(기본) / 7x(PRG 또는 RSI) / 10x(PRG + RSI 동시)
-손실한도: 개별 포지션당 계좌 2%
+v3.1 개선:
+- TP1 체결 감지 → SL 수량 자동 조정 (잔여 수량만 SL 유지)
+- TP2 거래소 주문 배치 (봇 꺼져도 안전)
+- 시드 100% 활용 (수익 포함 전액 재투입)
 """
 
 import time
 import logging
 import sys
+import threading
 from datetime import datetime
+from collections import defaultdict
 
 from config import SYMBOLS, LOG_FILE
 from rule_loader import R
 from data_fetcher import (
     initialize_exchange, fetch_all_timeframes,
-    get_account_balance, get_open_positions, set_leverage_dynamic
+    get_account_balance, get_open_positions, set_leverage_dynamic,
+    get_current_price,
 )
 from signal_generator import generate_signal, TradeSignal
-from trader import execute_trade
-from journal import print_stats, get_open_trades
+from trader import (
+    execute_trade, check_trailing_stop, update_stop_loss,
+    adjust_sl_after_tp1,
+)
+from journal import print_stats, get_open_trades, update_stats
 
 
 def setup_logging():
@@ -40,18 +47,214 @@ def setup_logging():
 def print_banner():
     print("""
 ╔══════════════════════════════════════════════════════════════╗
-║   바이낸스 선물 NEoWave 자동매매 봇 v2.0                    ║
+║   바이낸스 선물 NEoWave 자동매매 봇 v3.1                    ║
 ║   전략: 글렌 닐리 파동 + 지침서 절대법칙 + PRG              ║
 ║   TF : 4h→1h→15m→5m(메인)→1m(타점)                        ║
-║   레버리지: 4x / 7x / 10x (PRG+RSI 조건부)                  ║
-║   손실한도: 포지션당 계좌 2%                                 ║
+║   레버리지: 3x / 5x / 7x (PRG+RSI 조건부)                  ║
+║   시드: 100% 활용 | 수익 전액 재투입                         ║
+║   TP1(50%) → SL조정 → 트레일링/TP2(50%) 자동              ║
 ║   대상: BTC ETH BNB SOL XRP DOGE LINK ARB                   ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
 
+# ══════════════════════════════════════════════════════════════
+# 쿨다운 / 손실 추적 매니저
+# ══════════════════════════════════════════════════════════════
+
+class CooldownManager:
+    def __init__(self):
+        self.cooldowns: dict[str, float] = {}
+        self.consecutive_losses: dict[str, int] = defaultdict(int)
+        self._lock = threading.Lock()
+
+    def is_cooled_down(self, symbol: str) -> bool:
+        with self._lock:
+            if symbol in self.cooldowns:
+                if time.time() < self.cooldowns[symbol]:
+                    return False
+                del self.cooldowns[symbol]
+        return True
+
+    def set_cooldown(self, symbol: str, seconds: int):
+        with self._lock:
+            self.cooldowns[symbol] = time.time() + seconds
+
+    def record_loss(self, symbol: str):
+        with self._lock:
+            self.consecutive_losses[symbol] += 1
+            if self.consecutive_losses[symbol] >= R.max_consecutive_losses:
+                self.cooldowns[symbol] = time.time() + 3600
+                logging.getLogger("cooldown").warning(
+                    f"[{symbol}] 연속 {self.consecutive_losses[symbol]}회 손실 → 1시간 쿨다운"
+                )
+
+    def record_win(self, symbol: str):
+        with self._lock:
+            self.consecutive_losses[symbol] = 0
+
+    def get_remaining(self, symbol: str) -> int:
+        with self._lock:
+            if symbol in self.cooldowns:
+                return max(0, int(self.cooldowns[symbol] - time.time()))
+        return 0
+
+
+cooldown_mgr = CooldownManager()
+
+
+# ══════════════════════════════════════════════════════════════
+# 포지션 모니터링 (트레일링 + TP1 감지)
+# ══════════════════════════════════════════════════════════════
+
+class PositionTracker:
+    def __init__(self):
+        self.positions: dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def add(self, symbol: str, side: str, entry_price: float,
+            stop_loss: float, quantity: float, tp1_qty: float,
+            tp2_qty: float, atr_pct: float, trade_id: str):
+        with self._lock:
+            self.positions[symbol] = {
+                "side": side,
+                "entry_price": entry_price,
+                "original_sl": stop_loss,
+                "current_sl": stop_loss,
+                "quantity": quantity,
+                "tp1_qty": tp1_qty,
+                "tp2_qty": tp2_qty,
+                "remaining_qty": quantity,
+                "tp1_filled": False,
+                "atr_pct": atr_pct,
+                "trade_id": trade_id,
+            }
+
+    def remove(self, symbol: str):
+        with self._lock:
+            self.positions.pop(symbol, None)
+
+    def get_all(self) -> dict:
+        with self._lock:
+            return {k: dict(v) for k, v in self.positions.items()}
+
+    def update_sl(self, symbol: str, new_sl: float):
+        with self._lock:
+            if symbol in self.positions:
+                self.positions[symbol]["current_sl"] = new_sl
+
+    def mark_tp1_filled(self, symbol: str):
+        with self._lock:
+            if symbol in self.positions:
+                p = self.positions[symbol]
+                p["tp1_filled"] = True
+                p["remaining_qty"] = p["tp2_qty"]
+
+    def update_remaining_qty(self, symbol: str, qty: float):
+        with self._lock:
+            if symbol in self.positions:
+                self.positions[symbol]["remaining_qty"] = qty
+
+
+pos_tracker = PositionTracker()
+
+
+def monitor_positions(exchange, logger):
+    """오픈 포지션 모니터링: TP1 감지 + 트레일링 스탑"""
+    tracked = pos_tracker.get_all()
+    if not tracked:
+        return
+
+    for symbol, info in tracked.items():
+        try:
+            current_price = get_current_price(exchange, symbol)
+            if current_price <= 0:
+                continue
+
+            # ─── TP1 체결 감지 ─────────────────────────────────
+            if not info["tp1_filled"] and info["tp2_qty"] > 0:
+                actual_pos = _get_position_qty(exchange, symbol)
+                if actual_pos > 0 and actual_pos <= info["tp2_qty"] * 1.05:
+                    logger.info(
+                        f"[{symbol}] TP1 체결 감지! "
+                        f"원래:{info['quantity']} → 잔여:{actual_pos}"
+                    )
+                    pos_tracker.mark_tp1_filled(symbol)
+
+                    adjust_sl_after_tp1(
+                        exchange, symbol, info["side"],
+                        actual_pos, info["current_sl"]
+                    )
+                    pos_tracker.update_remaining_qty(symbol, actual_pos)
+                    cooldown_mgr.record_win(symbol)
+
+            # ─── 트레일링 스탑 ─────────────────────────────────
+            remaining = info["remaining_qty"]
+            if remaining <= 0:
+                continue
+
+            result = check_trailing_stop(
+                exchange, symbol, info["side"],
+                info["entry_price"], current_price,
+                info["current_sl"], info["atr_pct"],
+                remaining,
+            )
+
+            if result["action"] == "move_sl":
+                old_sl = info["current_sl"]
+                new_sl = result["new_sl"]
+                if update_stop_loss(exchange, symbol, info["side"],
+                                    remaining, old_sl, new_sl):
+                    pos_tracker.update_sl(symbol, new_sl)
+                    logger.info(f"[{symbol}] {result['reason']}")
+
+        except Exception as e:
+            logger.error(f"[{symbol}] 모니터링 오류: {e}")
+
+
+def _get_position_qty(exchange, symbol: str) -> float:
+    """거래소에서 실제 포지션 수량 조회"""
+    try:
+        positions = exchange.fetch_positions([symbol])
+        for p in positions:
+            if float(p.get("contracts", 0)) != 0:
+                return abs(float(p["contracts"]))
+    except Exception:
+        pass
+    return 0.0
+
+
+def sync_positions(exchange, logger):
+    """거래소 실제 포지션과 트래커 동기화"""
+    try:
+        open_pos = get_open_positions(exchange)
+        open_symbols = set()
+        for p in open_pos:
+            sym = p["symbol"].split(":")[0]
+            open_symbols.add(sym)
+
+        tracked = pos_tracker.get_all()
+        for symbol in list(tracked.keys()):
+            if symbol not in open_symbols:
+                info = tracked[symbol]
+                logger.info(f"[{symbol}] 포지션 완전 청산 감지 → 트래커 제거")
+
+                if info.get("current_sl", 0) > info.get("original_sl", 0):
+                    cooldown_mgr.record_win(symbol)
+                else:
+                    cooldown_mgr.record_loss(symbol)
+                    cooldown_mgr.set_cooldown(symbol, R.loss_cooldown_sec)
+
+                pos_tracker.remove(symbol)
+    except Exception as e:
+        logger.error(f"포지션 동기화 오류: {e}")
+
+
+# ══════════════════════════════════════════════════════════════
+# 스캔 루프
+# ══════════════════════════════════════════════════════════════
+
 def scan_all_symbols(exchange) -> list[TradeSignal]:
-    """8개 코인 순차 스캔, 신호 반환"""
     logger = logging.getLogger("scanner")
     signals = []
 
@@ -59,6 +262,11 @@ def scan_all_symbols(exchange) -> list[TradeSignal]:
     logger.info(f"스캔: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     for symbol in SYMBOLS:
+        if not cooldown_mgr.is_cooled_down(symbol):
+            remaining = cooldown_mgr.get_remaining(symbol)
+            logger.info(f"[{symbol}] 쿨다운 ({remaining}초 남음) → 스킵")
+            continue
+
         try:
             all_tf = fetch_all_timeframes(exchange, symbol)
             if not all_tf:
@@ -69,10 +277,10 @@ def scan_all_symbols(exchange) -> list[TradeSignal]:
                 signals.append(signal)
                 logger.info(
                     f"[{symbol}] 신호! {signal.side.upper()} {signal.leverage}x | "
-                    f"신뢰:{signal.confidence:.0%}"
+                    f"신뢰:{signal.confidence:.0%} | ATR:{signal.atr_pct:.3%}"
                 )
 
-            time.sleep(0.5)   # Rate limit 방지
+            time.sleep(0.5)
 
         except Exception as e:
             logger.error(f"[{symbol}] 스캔 오류: {e}")
@@ -82,7 +290,6 @@ def scan_all_symbols(exchange) -> list[TradeSignal]:
 
 
 def _print_signal(signal: TradeSignal, logger):
-    """매매 신호 상세 출력"""
     border = "=" * 62
     logger.info(f"\n{border}\n{signal.entry_reason}\n{border}")
 
@@ -92,7 +299,7 @@ def main():
     logger = logging.getLogger("main")
     print_banner()
 
-    # ─── 매매일지 통계 출력 ──────────────────────────────────────
+    update_stats()
     print_stats()
 
     logger.info("거래소 초기화 중...")
@@ -103,12 +310,14 @@ def main():
         logger.critical(f"초기화 실패: {e}")
         sys.exit(1)
 
-    # 미청산 오픈 기록 경고
+    init_balance = get_account_balance(exchange)
+    logger.info(f"초기잔고: {init_balance:.2f} USDT (전액 투입 가능)")
+
     open_journal = get_open_trades()
     if open_journal:
         logger.warning(f"[일지] 미청산 기록 {len(open_journal)}건 존재 (수동 확인 필요)")
         for t in open_journal:
-            logger.warning(f"  → {t['trade_id']} | {t['symbol']} {t['side']} | 진입: {t['entry_price']}")
+            logger.warning(f"  -> {t['trade_id']} | {t['symbol']} {t['side']} | 진입: {t['entry_price']}")
 
     scan_count = 0
 
@@ -117,29 +326,40 @@ def main():
         logger.info(f"\n[스캔 #{scan_count}]")
 
         try:
-            signals = scan_all_symbols(exchange)
+            sync_positions(exchange, logger)
+            monitor_positions(exchange, logger)
 
-            # 신뢰도 + 레버리지 높은 순으로 우선 처리
+            signals = scan_all_symbols(exchange)
             signals.sort(key=lambda s: (s.leverage, s.confidence), reverse=True)
 
             balance = get_account_balance(exchange)
             open_pos = get_open_positions(exchange)
 
+            if scan_count % 10 == 1:
+                logger.info(f"잔고: {balance:.2f} USDT (전액 투입 가능)")
+
             for signal in signals:
                 _print_signal(signal, logger)
 
-                # 진입 직전 레버리지 동적 설정
                 set_leverage_dynamic(exchange, signal.symbol, signal.leverage)
 
-                success = execute_trade(
+                result = execute_trade(
                     exchange, signal,
                     balance=balance,
                     open_positions=open_pos,
+                    cooldown_tracker=cooldown_mgr.cooldowns,
                 )
-                if success:
+                if result:
                     logger.info(f"[{signal.symbol}] 주문 완료 ({signal.leverage}x)")
-                    # 주문 후 포지션/잔고 갱신
-                    balance  = get_account_balance(exchange)
+                    pos_tracker.add(
+                        signal.symbol, signal.side,
+                        result["actual_entry"], result["actual_sl"],
+                        result["quantity"], result["tp1_qty"],
+                        result["tp2_qty"], signal.atr_pct,
+                        result["trade_id"],
+                    )
+                    cooldown_mgr.set_cooldown(signal.symbol, R.entry_cooldown_sec)
+                    balance = get_account_balance(exchange)
                     open_pos = get_open_positions(exchange)
                 else:
                     logger.info(f"[{signal.symbol}] 주문 스킵")
@@ -147,14 +367,13 @@ def main():
                 time.sleep(1)
 
         except KeyboardInterrupt:
-            logger.info("\nCtrl+C → 봇 종료")
+            logger.info("\nCtrl+C -> 봇 종료")
             break
         except Exception as e:
             logger.error(f"메인 루프 오류: {e}", exc_info=True)
 
-        # rules_config.json 변경 감지 → 파라미터 자동 재로드
         if R.check_and_reload():
-            logger.info("📋 지침서 파라미터 재로드 완료 — 다음 스캔부터 적용")
+            logger.info("지침서 파라미터 재로드 완료 — 다음 스캔부터 적용")
 
         interval = R.scan_interval_sec
         logger.info(f"{interval}초 후 재스캔...")

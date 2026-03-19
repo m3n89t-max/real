@@ -2,3 +2,5 @@ python-dotenv
 ccxt
 pandas
 numpy
+flask
+gunicorn

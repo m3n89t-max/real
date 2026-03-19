@@ -82,5 +82,5 @@ SLIPPAGE_DEFAULT_PCT = 0.0003  # 가격대 미해당 시 0.03%
 PRG_MIN_CONFLUENCE = 2   # 최소 피보나치 중첩 개수
 
 # ─── 스캔 설정 ────────────────────────────────────────────────
-SCAN_INTERVAL = 30   # 30초마다 스캔 (5m/1m 기준)
+SCAN_INTERVAL = 10   # 10초마다 스캔 (1m 스캘핑 기준)
 LOG_FILE = "trading_bot.log"

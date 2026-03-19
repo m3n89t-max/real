@@ -1,10 +1,10 @@
 """
-리스크 관리 모듈
+리스크 관리 모듈 v3.1
 
-핵심 원칙 (지침서 엔진5):
-- 개별 포지션 최대 손실 = 계좌 잔고 × 2%
+핵심 원칙:
+- 시드 100% 활용 (포지션당 계좌 5% 리스크, 수익 전액 재투입)
 - 포지션 크기 = 최대허용손실 / 손절거리 (레버리지 적용 역산)
-- 동적 레버리지: 4x / 7x / 10x
+- 동적 레버리지: 3x / 5x / 7x
 """
 
 import math
@@ -117,11 +117,52 @@ def is_risk_acceptable(
         logger.warning(f"[{symbol}] 손익비 부족: {rr_ratio:.2f} < {R.min_rr_ratio}")
         return False
 
-    # 계좌 2% 목표 + 슬리피지 여유 3% → 총 5% 이내 허용
-    if max_loss_pct > 0.05:
-        logger.warning(f"[{symbol}] 손실 과다: {max_loss_pct:.1%} > 5%")
+    # 단일 포지션 최대 손실: account_risk_pct × 3배 이내 (슬리피지 여유)
+    max_allowed_loss = R.account_risk_pct * 3
+    if max_loss_pct > max_allowed_loss:
+        logger.warning(f"[{symbol}] 손실 과다: {max_loss_pct:.1%} > {max_allowed_loss:.1%}")
         return False
 
+    return True
+
+
+def check_total_exposure(
+    balance: float,
+    open_positions: list,
+    new_notional: float,
+    new_leverage: int = 3,
+    symbol: str = "",
+) -> bool:
+    """
+    전체 포지션 증거금(마진) 합계가 계좌의 max_total_exposure_pct 이하인지 확인.
+    레버리지 거래이므로 명목가가 아닌 실제 투입 증거금으로 판단.
+    """
+    if balance <= 0:
+        return False
+
+    existing_margin = 0.0
+    for p in (open_positions or []):
+        try:
+            contracts = abs(float(p.get("contracts", 0)))
+            mark_price = float(p.get("markPrice", 0) or p.get("entryPrice", 0) or 0)
+            lev = float(p.get("leverage", 1) or 1)
+            existing_margin += (contracts * mark_price) / lev
+        except (ValueError, TypeError):
+            continue
+
+    new_margin = new_notional / max(new_leverage, 1)
+    total_margin = existing_margin + new_margin
+    margin_pct = total_margin / balance
+
+    max_exp = R.max_total_exposure_pct
+    if margin_pct > max_exp:
+        logger.warning(
+            f"[{symbol}] 증거금 초과: {margin_pct:.1%} > {max_exp:.1%} | "
+            f"기존마진:{existing_margin:.0f} + 신규마진:{new_margin:.0f} USDT"
+        )
+        return False
+
+    logger.info(f"[{symbol}] 증거금 OK: {margin_pct:.1%} / {max_exp:.1%}")
     return True
 
 

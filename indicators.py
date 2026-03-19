@@ -1,7 +1,7 @@
 """
 기술적 지표 모듈
 
-- RSI (Relative Strength Index) 계산
+- RSI / ATR / EMA / 볼륨 필터
 - RSI 다이버전스 감지
   · 일반 강세 다이버전스 (Regular Bullish): 가격 저점↓ + RSI 저점↑ → 상승 반전
   · 일반 약세 다이버전스 (Regular Bearish): 가격 고점↑ + RSI 고점↓ → 하락 반전
@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 RSI_PERIOD = 14
 RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
-DIVERGENCE_LOOKBACK = 50   # 다이버전스 탐색 범위 (캔들 수)
-PIVOT_WINDOW = 5            # 다이버전스용 피벗 좌우 캔들 수
+DIVERGENCE_LOOKBACK = 50
+PIVOT_WINDOW = 5
+ATR_PERIOD = 14
+VOLUME_MA_PERIOD = 20
 
 
 @dataclass
@@ -229,3 +231,89 @@ def divergence_aligns_with_signal(div: DivergenceResult, wave_direction: str) ->
         return True, f"파동 방향과 일치 ({div.strength} 강도)"
     else:
         return False, f"파동 방향과 불일치 (파동:{wave_side} ↔ 다이버전스:{div.signal_direction})"
+
+
+# ══════════════════════════════════════════════════════════════
+# ATR (Average True Range) — 동적 SL/TP 산정용
+# ══════════════════════════════════════════════════════════════
+
+def calculate_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> pd.Series:
+    """ATR 계산 (Wilder 방식)"""
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+    prev_close = close.shift(1)
+
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    return tr.ewm(alpha=1.0 / period, min_periods=period).mean()
+
+
+def get_atr_stop_distance(df: pd.DataFrame, multiplier: float = 2.0,
+                          period: int = ATR_PERIOD) -> float:
+    """현재 ATR 기반 손절 거리(가격 단위) 반환"""
+    atr = calculate_atr(df, period)
+    current_atr = float(atr.iloc[-1])
+    return current_atr * multiplier
+
+
+def get_atr_pct(df: pd.DataFrame, period: int = ATR_PERIOD) -> float:
+    """현재가 대비 ATR 비율 (%) — 변동성 지표"""
+    atr = calculate_atr(df, period)
+    current_price = float(df["close"].iloc[-1])
+    if current_price <= 0:
+        return 0.0
+    return float(atr.iloc[-1]) / current_price
+
+
+# ══════════════════════════════════════════════════════════════
+# EMA — 추세 확인용
+# ══════════════════════════════════════════════════════════════
+
+def calculate_ema(series: pd.Series, period: int) -> pd.Series:
+    return series.ewm(span=period, adjust=False).mean()
+
+
+def get_ema_trend(df: pd.DataFrame, fast: int = 9, slow: int = 21) -> str:
+    """EMA 기반 추세 방향: 'up' / 'down' / 'sideways'"""
+    close = df["close"]
+    ema_f = calculate_ema(close, fast)
+    ema_s = calculate_ema(close, slow)
+    current_price = float(close.iloc[-1])
+
+    above_fast = current_price > float(ema_f.iloc[-1])
+    above_slow = current_price > float(ema_s.iloc[-1])
+    fast_above_slow = float(ema_f.iloc[-1]) > float(ema_s.iloc[-1])
+
+    if above_fast and above_slow and fast_above_slow:
+        return "up"
+    elif not above_fast and not above_slow and not fast_above_slow:
+        return "down"
+    return "sideways"
+
+
+# ══════════════════════════════════════════════════════════════
+# 볼륨 필터 — 가짜 신호 방지
+# ══════════════════════════════════════════════════════════════
+
+def is_volume_confirmed(df: pd.DataFrame, lookback: int = VOLUME_MA_PERIOD,
+                        threshold: float = 1.0) -> bool:
+    """
+    최근 3봉 평균 거래량이 N기간 평균 대비 threshold 이상인지 확인.
+    단일 봉(형성 중/이상치)에 의존하지 않고 최근 흐름을 본다.
+    """
+    if len(df) < lookback + 4:
+        return True
+
+    vol = df["volume"].iloc[:-1]  # 형성 중 봉 제외
+    vol_ma = vol.rolling(lookback).mean()
+    recent_avg = float(vol.iloc[-3:].mean())
+    long_avg = float(vol_ma.iloc[-1])
+
+    if long_avg <= 0:
+        return True
+    return recent_avg >= long_avg * threshold

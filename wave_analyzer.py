@@ -295,6 +295,105 @@ def check_flat_laws(p0, pA, pB, pC, direction: str) -> tuple[bool, float, str]:
     return True, score / 2.0, ""
 
 
+def check_terminal_laws(p0, p1, p2, p3, p4, direction: str) -> tuple[bool, float, str]:
+    """
+    터미널 충격파(다이아고날/엔딩 웨지) 절대법칙 (지침서 모듈2)
+
+    - 모든 내부 파동이 3구조 (여기선 진폭 비율로 근사)
+    - 2파와 4파 가격대가 반드시 겹쳐야 함 (임펄스와 반대)
+    - 각 파동이 이전보다 작아지는 수렴 구조
+    - 1파 연장 터미널: 5번 파동이 1-3 추세선을 이탈(fakeout)해야 완성
+    """
+    if direction == "up":
+        w1 = p1.price - p0.price
+        w2 = p1.price - p2.price   # 2파 조정 크기
+        w3 = p3.price - p2.price
+        w4 = p3.price - p4.price   # 4파 조정 크기
+        # 2파와 4파 겹침 필수: 4파 저점이 1파 고점보다 낮아야 함
+        overlap = p4.price < p1.price
+    else:
+        w1 = p0.price - p1.price
+        w2 = p2.price - p1.price
+        w3 = p2.price - p3.price
+        w4 = p4.price - p3.price
+        # 2파와 4파 겹침: 4파 고점이 1파 저점보다 높아야 함
+        overlap = p4.price > p1.price
+
+    # 절대법칙: 2파와 4파 겹침 필수
+    if not overlap:
+        return False, 0.0, "터미널: 2파-4파 겹침 없음 (기각)"
+
+    if w1 <= 0 or w2 <= 0 or w3 <= 0 or w4 <= 0:
+        return False, 0.0, "터미널: 파동 크기 오류"
+
+    score = 0
+
+    # 수렴 검증: 각 충격파가 이전보다 작아야 함 (수렴형)
+    if w3 < w1:
+        score += 2
+    # 조정파도 수렴 경향
+    if w4 < w2:
+        score += 1
+
+    # 피보나치 비율: 2파는 1파의 61.8~88.6% 되돌림
+    r2 = w2 / w1
+    if _fib_match(r2, [FIB_618, FIB_786, FIB_886]):
+        score += 2
+
+    # 3파는 1파의 61.8~100% (수렴이므로 1파보다 작거나 비슷)
+    r3 = w3 / w1
+    if _fib_match(r3, [FIB_618, FIB_786, FIB_1000]):
+        score += 1
+
+    confidence = min(0.50 + score * 0.07, 0.85)
+    return True, confidence, ""
+
+
+def check_triangle_laws(pivots: list) -> tuple[bool, float, str]:
+    """
+    삼각형(3-3-3-3-3) 절대법칙 (지침서 모듈2)
+
+    - 최소 3개의 내부 파동이 직전 파동의 50% 이상을 되돌려야 함
+    - E파(마지막 파동)가 가격상 가장 짧아야 함
+    - B-D 추세선 사용 (0-B 추세선 절대 금지)
+    - 수렴형: 각 파동이 점점 작아지는 경향
+    """
+    if len(pivots) < 5:
+        return False, 0.0, "삼각형: 피벗 부족 (최소 5개 필요)"
+
+    p = pivots[-5:]
+    wA = abs(p[1].price - p[0].price)
+    wB = abs(p[2].price - p[1].price)
+    wC = abs(p[3].price - p[2].price)
+    wD = abs(p[4].price - p[3].price)
+
+    waves = [wA, wB, wC, wD]
+    if any(w <= 0 for w in waves):
+        return False, 0.0, "삼각형: 파동 크기 오류"
+
+    # 최소 3개 내부 파동이 직전 파동의 50% 이상 되돌림
+    retrace_count = sum(
+        1 for i in range(1, 4) if waves[i] >= waves[i - 1] * 0.50
+    )
+    if retrace_count < 3:
+        return False, 0.0, f"삼각형: 되돌림 조건 미달 ({retrace_count}/3)"
+
+    score = retrace_count  # 3~4점
+
+    # E파(wD)가 가격상 가장 짧아야 함
+    if wD <= min(wA, wB, wC):
+        score += 2
+
+    # 수렴형 확인: A > B > C or B > C > D
+    if wA > wB and wC > wD:
+        score += 1
+    if wB > wC and wC > wD:
+        score += 1
+
+    confidence = min(0.50 + score * 0.06, 0.88)
+    return True, confidence, ""
+
+
 # ══════════════════════════════════════════════════════════════
 # 엔진 3: 추세선 트리거
 # ══════════════════════════════════════════════════════════════
@@ -607,7 +706,7 @@ def analyze_wave(df: pd.DataFrame, pivot_left: int = None, pivot_right: int = No
                 return result
 
     # ──────────────────────────────────────────────────────────
-    # 패턴 7: 플랫 Wave C 진입
+    # 패턴 7: 플랫 Wave C 진입 (하락 조정)
     # ──────────────────────────────────────────────────────────
     for i in range(len(recent) - 3):
         p = recent[i:i+4]
@@ -628,15 +727,232 @@ def analyze_wave(df: pd.DataFrame, pivot_left: int = None, pivot_right: int = No
                 result.abs_law_passed     = True
                 return result
 
+    # ──────────────────────────────────────────────────────────
+    # 패턴 8: 플랫 Wave C 진입 (상승 조정 — 하락 플랫의 반대)
+    # p0(저) → pA(고) → pB(저) → Wave C 상승 진입
+    # ──────────────────────────────────────────────────────────
+    for i in range(len(recent) - 3):
+        p = recent[i:i+4]
+        if (not p[0].is_high and p[1].is_high and not p[2].is_high and p[3].is_high):
+            valid, conf, reason = check_flat_laws(p[0], p[1], p[2], p[3], "up")
+            if valid and conf >= R.min_confidence:
+                wA = p[1].price - p[0].price
+                prg = calculate_prg(list(p), "up")
+                result.wave_type          = WaveType.FLAT
+                result.current_position   = WavePosition.WAVE_C
+                result.direction          = "up"
+                result.fib_valid          = True
+                result.entry_zone         = True
+                result.target_price       = p[2].price + wA * FIB_1000
+                result.invalidation_price = p[2].price
+                result.confidence         = conf
+                result.prg                = prg
+                result.abs_law_passed     = True
+                return result
+
+    # ──────────────────────────────────────────────────────────
+    # 패턴 9: 상승 터미널 충격파 완성 → 숏 반전 진입
+    # p0(L)→p1(H)→p2(L)→p3(H)→p4(L): 4파가 1파 고점 하향 겹침
+    # 터미널 완성 = 큰 반전 신호 → 공매도 진입
+    # ──────────────────────────────────────────────────────────
+    for i in range(len(recent) - 4):
+        p = recent[i:i+5]
+        if (not p[0].is_high and p[1].is_high and
+                not p[2].is_high and p[3].is_high and not p[4].is_high):
+            valid, conf, reason = check_terminal_laws(
+                p[0], p[1], p[2], p[3], p[4], "up"
+            )
+            if valid and conf >= R.min_confidence:
+                # 2-4 추세선 돌파 여부 (터미널 마감 확인)
+                tl = check_trendlines(list(p), current_price, current_idx)
+                if not tl.broken_24:
+                    continue  # 아직 2-4 추세선 미돌파 → 터미널 미완성
+                prg = calculate_prg(list(p), "down")
+                result.wave_type          = WaveType.TERMINAL
+                result.current_position   = WavePosition.WAVE5
+                result.direction          = "down"      # 터미널 완성 → 강한 반전 하락
+                result.fib_valid          = True
+                result.entry_zone         = True
+                result.target_price       = _terminal_reversal_tp(p[0])
+                result.invalidation_price = p[3].price  # 3파 고점 위에서 SL
+                result.confidence         = conf
+                result.prg                = prg
+                result.trendline          = tl
+                result.abs_law_passed     = True
+                return result
+
+    # ──────────────────────────────────────────────────────────
+    # 패턴 10: 하락 터미널 충격파 완성 → 롱 반전 진입
+    # p0(H)→p1(L)→p2(H)→p3(L)→p4(H): 4파가 1파 저점 상향 겹침
+    # ──────────────────────────────────────────────────────────
+    for i in range(len(recent) - 4):
+        p = recent[i:i+5]
+        if (p[0].is_high and not p[1].is_high and
+                p[2].is_high and not p[3].is_high and p[4].is_high):
+            valid, conf, reason = check_terminal_laws(
+                p[0], p[1], p[2], p[3], p[4], "down"
+            )
+            if valid and conf >= R.min_confidence:
+                tl = check_trendlines(list(p), current_price, current_idx)
+                if not tl.broken_24:
+                    continue
+                prg = calculate_prg(list(p), "up")
+                result.wave_type          = WaveType.TERMINAL
+                result.current_position   = WavePosition.WAVE5
+                result.direction          = "up"        # 하락 터미널 완성 → 강한 반전 상승
+                result.fib_valid          = True
+                result.entry_zone         = True
+                result.target_price       = _terminal_reversal_tp(p[0])
+                result.invalidation_price = p[3].price  # 3파 저점 아래에서 SL
+                result.confidence         = conf
+                result.prg                = prg
+                result.trendline          = tl
+                result.abs_law_passed     = True
+                return result
+
+    # ──────────────────────────────────────────────────────────
+    # 패턴 11: 삼각형 수렴 + B-D 추세선 상향 돌파 → 롱
+    # 5개 교대 피벗 (ABCDE), B-D 추세선 상향 이탈 = 상방 분출
+    # ──────────────────────────────────────────────────────────
+    if len(recent) >= 5:
+        tri_pivots = recent[-5:]
+        # 수렴형 하락 삼각형: H-L-H-L-H (마지막 H 이후 상방 분출)
+        if (tri_pivots[0].is_high and not tri_pivots[1].is_high and
+                tri_pivots[2].is_high and not tri_pivots[3].is_high and
+                tri_pivots[4].is_high):
+            valid, conf, reason = check_triangle_laws(list(tri_pivots))
+            if valid and conf >= R.min_confidence:
+                tl = check_trendlines(list(tri_pivots), current_price, current_idx)
+                if tl.broken_bd:  # B-D 추세선 상향 돌파
+                    prg = calculate_prg(list(tri_pivots), "up")
+                    tp  = _triangle_breakout_tp(list(tri_pivots), current_price, "up")
+                    result.wave_type          = WaveType.TRIANGLE
+                    result.current_position   = WavePosition.COMPLETE
+                    result.direction          = "up"
+                    result.fib_valid          = True
+                    result.entry_zone         = True
+                    result.target_price       = tp
+                    result.invalidation_price = tri_pivots[-1].price * 0.998
+                    result.confidence         = conf
+                    result.prg                = prg
+                    result.trendline          = tl
+                    result.abs_law_passed     = True
+                    return result
+
+    # ──────────────────────────────────────────────────────────
+    # 패턴 12: 삼각형 수렴 + B-D 추세선 하향 돌파 → 숏
+    # 5개 교대 피벗 (ABCDE), B-D 추세선 하향 이탈 = 하방 분출
+    # ──────────────────────────────────────────────────────────
+    if len(recent) >= 5:
+        tri_pivots = recent[-5:]
+        # 수렴형 상승 삼각형: L-H-L-H-L (마지막 L 이후 하방 분출)
+        if (not tri_pivots[0].is_high and tri_pivots[1].is_high and
+                not tri_pivots[2].is_high and tri_pivots[3].is_high and
+                not tri_pivots[4].is_high):
+            valid, conf, reason = check_triangle_laws(list(tri_pivots))
+            if valid and conf >= R.min_confidence:
+                tl = check_trendlines(list(tri_pivots), current_price, current_idx)
+                if tl.broken_24:  # 저점 추세선 하향 돌파
+                    prg = calculate_prg(list(tri_pivots), "down")
+                    tp  = _triangle_breakout_tp(list(tri_pivots), current_price, "down")
+                    result.wave_type          = WaveType.TRIANGLE
+                    result.current_position   = WavePosition.COMPLETE
+                    result.direction          = "down"
+                    result.fib_valid          = True
+                    result.entry_zone         = True
+                    result.target_price       = tp
+                    result.invalidation_price = tri_pivots[-1].price * 1.002
+                    result.confidence         = conf
+                    result.prg                = prg
+                    result.trendline          = tl
+                    result.abs_law_passed     = True
+                    return result
+
     return result
 
 
 def _wave5_target(p0, p1, p2, p3, p4, direction: str) -> float:
-    """Wave 5 목표가: Wave 1 크기의 1.0배 (소모닉 0.618 되돌림 기반)"""
+    """Wave 5 목표가: Wave 1 크기의 1.0배"""
     w1 = abs(p1.price - p0.price)
     if direction == "up":
         return p4.price + w1
     return p4.price - w1
+
+
+def _determine_extension_type(w1: float, w3: float, w5: float) -> str:
+    """
+    임펄스 파동에서 연장된 파동 식별 (지침서 모듈2)
+    가장 긴 파동이 두 번째로 긴 파동의 1.618배 이상 → 그 파동이 연장됨
+    반환: "1" | "3" | "5" | "none"
+    """
+    candidates = [("1", w1), ("3", w3)]
+    if w5 > 0:
+        candidates.append(("5", w5))
+    candidates.sort(key=lambda x: x[1], reverse=True)
+
+    if len(candidates) >= 2 and candidates[1][1] > 0:
+        if candidates[0][1] / candidates[1][1] >= FIB_1618 * (1 - 0.08):
+            return candidates[0][0]
+    return "none"
+
+
+def _impulse_reversal_tp(p0, p1, p2, p3, p4, direction: str) -> float:
+    """
+    임펄스 완성 후 반전 목표가 (지침서 모듈5)
+    - 1파 연장: 직전 2파 영역 (p2) 되돌림
+    - 3파 연장: 직전 4파 영역 (p4) 되돌림
+    - 5파 연장: 전체 임펄스의 0.618 되돌림
+    - 기타: 전체의 0.618 되돌림
+    """
+    if direction == "up":
+        w1 = p1.price - p0.price
+        w3 = p3.price - p2.price
+        w5 = 0.0
+        ext = _determine_extension_type(w1, w3, w5)
+        if ext == "1":
+            return p2.price            # 2파 영역
+        elif ext == "3":
+            return p4.price            # 4파 영역
+        else:
+            total = p3.price - p0.price  # 전체 임펄스 추정
+            return p3.price - total * FIB_618
+    else:
+        w1 = p0.price - p1.price
+        w3 = p2.price - p3.price
+        w5 = 0.0
+        ext = _determine_extension_type(w1, w3, w5)
+        if ext == "1":
+            return p2.price
+        elif ext == "3":
+            return p4.price
+        else:
+            total = p0.price - p3.price
+            return p3.price + total * FIB_618
+
+
+def _terminal_reversal_tp(p0_terminal: "Pivot") -> float:
+    """
+    터미널 충격파 완성 후 목표가 (지침서 모듈5)
+    터미널 형성 시간의 50% 이내에 시작점 100% 되돌려야 함
+    → 시작점(p0)이 목표가
+    """
+    return p0_terminal.price
+
+
+def _triangle_breakout_tp(pivots: list, breakout_price: float, direction: str) -> float:
+    """
+    삼각형 돌파 후 목표가 (지침서 모듈5)
+    삼각형 내 가장 큰 파동의 100% (범위: 75%~125%)
+    → 보통 100% 도달 시 주력 청산
+    """
+    if len(pivots) < 5:
+        return breakout_price
+    p = pivots[-5:]
+    waves = [abs(p[i + 1].price - p[i].price) for i in range(4)]
+    max_wave = max(waves) if waves else 0.0
+    if direction == "up":
+        return breakout_price + max_wave
+    return breakout_price - max_wave
 
 
 def get_trend_direction(df: pd.DataFrame) -> str:

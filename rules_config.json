@@ -1,5 +1,5 @@
 {
-  "_comment": "지침서 기반 자동매매 파라미터 — 대시보드에서 수정 가능, 봇에 즉시 반영됨",
+  "_comment": "지침서 기반 자동매매 파라미터 v4.0 — 초단타(스캘핑) 1m 메인",
   "_updated": "",
 
   "파동_절대법칙": {
@@ -10,7 +10,7 @@
     "_note_ext": "연장의 법칙 - 가장 긴 파동이 두 번째의 N배 이상",
 
     "wave4_overlap_allowed": false,
-    "_note_w4": "4파와 1파 영역 겹침 허용 여부 (false = 겹치면 기각)",
+    "_note_w4": "4파와 1파 영역 겹침 허용 여부 (false = 겹치면 기각, 터미널은 예외)",
 
     "wave3_shortest_reject": true,
     "_note_w3": "3파가 가장 짧을 경우 즉시 기각"
@@ -21,63 +21,97 @@
     "wave3_extension":    [1.272, 1.618, 2.618],
     "wave5_extension":    [0.618, 1.000, 1.272],
     "zigzag_b_max":       0.618,
-    "_note_zb": "지그재그 B파 최대 되돌림 (A파 대비)",
     "flat_b_min":         0.618,
-    "_note_fb": "플랫 B파 최소 되돌림 (A파 대비)",
-    "fib_tolerance":      0.12,
-    "_note_tol": "피보나치 비율 허용 오차 ±N"
+    "fib_tolerance":      0.12
   },
 
   "조정파동_규칙": {
     "zigzag_c_ratios":    [0.618, 1.000, 1.272, 1.618],
     "flat_c_ratios":      [1.000, 1.272, 1.618],
-    "flat_irregular_b":   [1.000, 1.272, 1.382],
-    "_note_momentum": "복합조정 모멘텀 순서: 지그재그 > 플랫 > 삼각형"
+    "flat_irregular_b":   [1.000, 1.272, 1.382]
   },
 
   "진입_조건": {
-    "min_confidence":       0.40,
-    "_note_conf": "최소 파동 신뢰도 (낮출수록 더 많은 신호)",
+    "min_confidence":         0.50,
     "counter_trend_min_conf": 0.65,
-    "_note_ct": "반추세 매매 시 최소 신뢰도",
-    "min_rr_ratio":         1.5,
-    "_note_rr": "최소 손익비",
-    "min_prg_confluence":   2,
-    "_note_prg": "PRG 유효 최소 피보나치 중첩 개수",
-    "prg_zone_buffer_pct":  0.005,
-    "_note_prgbuf": "PRG 진입 허용 버퍼 ±%"
+    "_note_counter": "역추세 진입은 신뢰도 65% 이상 요구",
+    "min_rr_ratio":           1.5,
+    "_note_rr": "스캘핑 손익비 최소 1:1.5",
+    "min_prg_confluence":     2,
+    "prg_zone_buffer_pct":    0.003,
+    "volume_threshold":       0.8,
+    "_note_vol": "1m 최근 3봉 거래량이 20봉 평균의 0.8배 이상",
+    "require_ema_align":      true
   },
 
   "목표가_손절_규칙": {
     "somonics_tp_ratio":    0.618,
-    "_note_tp": "소모닉 익절 고정 비율 (지침서 엔진5: 0.618 되돌림)",
-    "stop_loss_pct":        0.02,
-    "_note_sl": "손절 비율 (-N%)",
+    "stop_loss_pct":        0.003,
+    "_note_sl": "스캘핑 기본 SL 0.3% (1m 기준 타이트하게)",
+    "atr_sl_multiplier":    1.5,
+    "_note_atr": "ATR × 1.5 (스캘핑용, 기존 2.0에서 축소)",
+    "atr_sl_max_pct":       0.008,
+    "_note_atrmax": "스캘핑 최대 SL 0.8%",
+    "atr_sl_min_pct":       0.002,
+    "_note_atrmin": "스캘핑 최소 SL 0.2%",
     "account_risk_pct":     0.02,
-    "_note_risk": "개별 포지션당 최대 손실 (계좌 대비 비율)",
-    "min_tp_pct":           0.03,
-    "_note_min_tp": "최소 TP (= SL × min_rr → 2% × 1.5 = 3%). 코드에서 자동 보장됨",
-    "max_tp_pct":           0.20,
-    "_note_max_tp": "최대 TP 상한 (파동 목표가 그대로 사용, 무제한 방지용 캡)"
+    "_note_risk": "포지션당 계좌 2% 리스크",
+    "min_tp_pct":           0.004,
+    "_note_mintp": "최소 TP 0.4%",
+    "max_tp_pct":           0.03,
+    "_note_maxtp": "최대 TP 3% (스캘핑 상한)"
+  },
+
+  "트레일링_스탑": {
+    "enabled":              true,
+    "activation_rr":        1.0,
+    "_note_act": "RR 1:1 도달 시 트레일링 활성화",
+    "trail_distance_atr":   1.0,
+    "_note_trail": "스캘핑용 트레일링 거리 1.0 ATR (기존 1.5에서 축소)",
+    "breakeven_rr":         0.5,
+    "_note_be": "RR 0.5 도달 시 SL → 진입가 (본전 보호)"
+  },
+
+  "분할_익절": {
+    "enabled":              true,
+    "tp1_ratio":            0.6,
+    "_note_tp1": "1차 익절: 포지션의 60% (야금야금 수익 확보)",
+    "tp1_rr":               0.7,
+    "_note_tp1_rr": "1차 익절 시점: RR 0.7 (빠르게 챙기기)",
+    "tp2_ratio":            0.4,
+    "_note_tp2": "2차 익절: 나머지 40% + 트레일링",
+    "tp2_rr":               1.5,
+    "_note_tp2_rr": "2차 목표가 RR 1.5"
+  },
+
+  "쿨다운": {
+    "entry_cooldown_sec":   60,
+    "_note_cool": "스캘핑: 진입 후 60초 쿨다운",
+    "loss_cooldown_sec":    180,
+    "_note_loss": "손절 후 3분 쿨다운",
+    "max_consecutive_losses": 3
   },
 
   "레버리지": {
-    "default":  4,
-    "medium":   7,
-    "_note_med": "PRG 또는 RSI 다이버전스 단독 확인 시",
-    "max":      10,
-    "_note_max": "PRG + RSI 다이버전스 동시 확인 시 (가장 확실한 자리)"
+    "default":  3,
+    "_note_d": "파동 단독 신호",
+    "medium":   5,
+    "_note_m": "PRG 또는 RSI 다이버전스 단독",
+    "max":      7,
+    "_note_x": "PRG + RSI 다이버전스 동시"
   },
 
   "피벗_감지": {
-    "pivot_left":  5,
-    "pivot_right": 5,
-    "_note_pivot": "스윙 하이/로우 감지 좌우 캔들 수"
+    "pivot_left":  3,
+    "_note_pl": "1m 스캘핑용 피벗 윈도우 축소 (기존 5→3)",
+    "pivot_right": 3
   },
 
   "스캔": {
-    "scan_interval_sec": 30,
-    "_note_scan": "메인 루프 스캔 간격 (초)",
-    "max_open_positions": 4
+    "scan_interval_sec": 10,
+    "_note_scan": "스캘핑: 10초마다 1m 신호 스캔",
+    "max_open_positions": 3,
+    "max_total_exposure_pct": 1.0,
+    "_note_exp": "증거금 합계 ≤ 계좌의 100% (씨드 전액 활용)"
   }
 }

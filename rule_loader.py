@@ -211,6 +211,86 @@ class RuleLoader:
     def max_open_positions(self) -> int:
         return int(self.get("스캔.max_open_positions", 4))
 
+    # ── ATR / 동적 SL ────────────────────────────────────────────
+
+    @property
+    def atr_sl_multiplier(self) -> float:
+        return self.get("목표가_손절_규칙.atr_sl_multiplier", 2.0)
+
+    @property
+    def atr_sl_max_pct(self) -> float:
+        return self.get("목표가_손절_규칙.atr_sl_max_pct", 0.05)
+
+    @property
+    def atr_sl_min_pct(self) -> float:
+        return self.get("목표가_손절_규칙.atr_sl_min_pct", 0.015)
+
+    # ── 진입 필터 ──────────────────────────────────────────────
+
+    @property
+    def volume_threshold(self) -> float:
+        return self.get("진입_조건.volume_threshold", 1.0)
+
+    @property
+    def require_ema_align(self) -> bool:
+        return self.get("진입_조건.require_ema_align", True)
+
+    # ── 트레일링 스탑 ──────────────────────────────────────────
+
+    @property
+    def trailing_enabled(self) -> bool:
+        return self.get("트레일링_스탑.enabled", True)
+
+    @property
+    def trailing_activation_rr(self) -> float:
+        return self.get("트레일링_스탑.activation_rr", 1.0)
+
+    @property
+    def trailing_distance_atr(self) -> float:
+        return self.get("트레일링_스탑.trail_distance_atr", 1.5)
+
+    @property
+    def breakeven_rr(self) -> float:
+        return self.get("트레일링_스탑.breakeven_rr", 0.5)
+
+    # ── 분할 익절 ──────────────────────────────────────────────
+
+    @property
+    def partial_tp_enabled(self) -> bool:
+        return self.get("분할_익절.enabled", True)
+
+    @property
+    def tp1_ratio(self) -> float:
+        return self.get("분할_익절.tp1_ratio", 0.5)
+
+    @property
+    def tp1_rr(self) -> float:
+        return self.get("분할_익절.tp1_rr", 1.5)
+
+    @property
+    def tp2_rr(self) -> float:
+        return self.get("분할_익절.tp2_rr", 3.0)
+
+    # ── 쿨다운 ─────────────────────────────────────────────────
+
+    @property
+    def entry_cooldown_sec(self) -> int:
+        return int(self.get("쿨다운.entry_cooldown_sec", 300))
+
+    @property
+    def loss_cooldown_sec(self) -> int:
+        return int(self.get("쿨다운.loss_cooldown_sec", 600))
+
+    @property
+    def max_consecutive_losses(self) -> int:
+        return int(self.get("쿨다운.max_consecutive_losses", 3))
+
+    # ── 총 노출도 ──────────────────────────────────────────────
+
+    @property
+    def max_total_exposure_pct(self) -> float:
+        return self.get("스캔.max_total_exposure_pct", 0.50)
+
     # ── 파동 피보나치 리스트 ──────────────────────────────────────
 
     def wave2_retracement(self) -> list:
