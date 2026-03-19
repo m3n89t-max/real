@@ -200,30 +200,31 @@ def generate_signal(symbol: str, all_tf: dict) -> Optional[TradeSignal]:
         elif trend != "sideways":
             align_score -= weight
 
-    # 4h가 명확히 반대 방향이면 스킵 (거시 추세 역행 금지)
-    if trend_4h not in ("sideways",) and trend_4h != wave_dir:
-        logger.info(f"[{symbol}] 4h 추세({trend_4h}) ↔ 1m 방향({wave_dir}) 반대 → 스킵")
-        return None
-
-    # ── 필터2: 4h + 1h 동시 확인 ─────────────────────────────
-    # 4h와 1h 중 하나라도 반대 방향이면 진입 금지
-    # (둘 다 sideways는 허용 — 횡보 돌파 노림)
-    if trend_4h != wave_dir and trend_4h != "sideways":
-        logger.info(f"[{symbol}] [필터2] 4h({trend_4h}) 불일치 → 스킵")
-        return None
-    if trend_1h != wave_dir and trend_1h != "sideways":
-        logger.info(f"[{symbol}] [필터2] 1h({trend_1h}) 불일치 → 스킵")
-        return None
-    # 4h + 1h 둘 다 sideways이면 15m 이상 방향 확인 필요
-    if trend_4h == "sideways" and trend_1h == "sideways":
-        if trend_15m != wave_dir:
-            logger.info(f"[{symbol}] [필터2] 4h·1h 모두 횡보 + 15m({trend_15m}) 미확인 → 스킵")
+    # ── 필터2: 롱/숏 방향별 TF 조건 ─────────────────────────────
+    if wave_dir == "up":   # ── LONG 조건 ──
+        # 4h가 하락이면 매크로 역행 → 금지
+        if trend_4h == "down":
+            logger.info(f"[{symbol}] [필터2-롱] 4h({trend_4h}) 하락 중 → 스킵")
+            return None
+        # 1h도 하락이면 중기 역행 → 금지
+        if trend_1h == "down":
+            logger.info(f"[{symbol}] [필터2-롱] 1h({trend_1h}) 하락 중 → 스킵")
+            return None
+        # 4h·1h 모두 횡보면 15m 상승 필요
+        if trend_4h == "sideways" and trend_1h == "sideways" and trend_15m != "up":
+            logger.info(f"[{symbol}] [필터2-롱] 4h·1h 횡보 + 15m({trend_15m}) 미확인 → 스킵")
             return None
 
-    # 1h가 반대 방향이고 신뢰도 낮으면 스킵 (기존 유지)
-    if trend_1h not in ("sideways",) and trend_1h != wave_dir and wave_1m.confidence < R.counter_trend_min_conf:
-        logger.info(f"[{symbol}] 1h 반추세({trend_1h}) + 신뢰도({wave_1m.confidence:.0%}) 부족 → 스킵")
-        return None
+    else:                  # ── SHORT 조건 ──
+        # 4h가 상승이어도 숏 허용 (스캘핑 반전 포착)
+        # 단, 1h는 반드시 하락 또는 횡보여야 함
+        if trend_1h == "up":
+            logger.info(f"[{symbol}] [필터2-숏] 1h({trend_1h}) 상승 중 → 스킵")
+            return None
+        # 1h 횡보면 15m 하락 필요
+        if trend_1h == "sideways" and trend_15m != "down":
+            logger.info(f"[{symbol}] [필터2-숏] 1h 횡보 + 15m({trend_15m}) 미확인 → 스킵")
+            return None
 
     # 다중TF 정렬 점수가 너무 낮으면 스킵
     if align_score < -1:
