@@ -327,20 +327,95 @@ def _run_bot():
             except Exception as e:
                 logger.error(f"[{symbol}] 모니터링 오류: {e}")
 
+    def _get_last_fill_price(exch, symbol):
+        """해당 심볼의 가장 최근 체결가 조회"""
+        try:
+            trades = exch.fetch_my_trades(symbol, limit=10)
+            if trades:
+                trades.sort(key=lambda t: t["timestamp"], reverse=True)
+                return float(trades[0]["price"])
+        except Exception as e:
+            logger.warning(f"[{symbol}] 체결가 조회 실패: {e}")
+        try:
+            return get_current_price(exch, symbol)
+        except Exception:
+            return None
+
     def sync_positions(exch):
         try:
             open_syms = {p["symbol"].split(":")[0] for p in get_open_positions(exch)}
             for sym in list(pos_tracker.get_all().keys()):
                 if sym not in open_syms:
-                    info = pos_tracker.get_all().get(sym, {})
-                    if info.get("current_sl", 0) > info.get("original_sl", 0):
+                    info     = pos_tracker.get_all().get(sym, {})
+                    trade_id = info.get("trade_id")
+                    side     = info.get("side", "long")
+
+                    # 실제 청산가 조회
+                    exit_price = _get_last_fill_price(exch, sym)
+
+                    # 청산 사유 판단
+                    cur_sl  = info.get("current_sl", 0)
+                    orig_sl = info.get("original_sl", 0)
+                    if cur_sl > orig_sl:
+                        # 트레일링 SL이 올라갔다 = TP 도달 후 청산
+                        exit_reason = "TP"
                         cooldown_mgr.record_win(sym)
+                    elif exit_price:
+                        ep = info.get("entry_price", exit_price)
+                        if side == "long":
+                            exit_reason = "TP" if exit_price > ep else "SL"
+                        else:
+                            exit_reason = "TP" if exit_price < ep else "SL"
+                        if exit_reason == "TP":
+                            cooldown_mgr.record_win(sym)
+                        else:
+                            cooldown_mgr.record_loss(sym)
+                            cooldown_mgr.set_cooldown(sym, R.loss_cooldown_sec)
                     else:
+                        exit_reason = "SL"
                         cooldown_mgr.record_loss(sym)
                         cooldown_mgr.set_cooldown(sym, R.loss_cooldown_sec)
+
+                    # 저널 청산 기록
+                    if trade_id and exit_price:
+                        try:
+                            from journal import record_exit
+                            record_exit(trade_id, exit_price, exit_reason)
+                            logger.info(f"[{sym}] 저널 동기화: {exit_reason} @ {exit_price:.4f}")
+                        except Exception as je:
+                            logger.error(f"[{sym}] 저널 청산 기록 실패: {je}")
+
                     pos_tracker.remove(sym)
         except Exception as e:
             logger.error(f"포지션 동기화 오류: {e}")
+
+    def reconcile_journal(exch):
+        """봇 시작 시 저널 OPEN 거래를 거래소 실제 포지션과 대조해 미동기화 항목 일괄 청산"""
+        try:
+            from journal import get_open_trades, record_exit
+            open_journal = get_open_trades()
+            if not open_journal:
+                return
+            real_positions = get_open_positions(exch)
+            real_syms = {p["symbol"].split(":")[0] for p in real_positions}
+            stale = [t for t in open_journal if t["symbol"] not in real_syms]
+            if not stale:
+                return
+            logger.info(f"미동기화 OPEN 거래 {len(stale)}건 발견 → 거래소 체결가로 정산")
+            for t in stale:
+                sym   = t["symbol"]
+                tid   = t["trade_id"]
+                side  = t["side"]
+                ep    = float(t["entry_price"])
+                exit_price = _get_last_fill_price(exch, sym) or ep
+                exit_reason = "SL" if (
+                    (side == "long"  and exit_price < ep) or
+                    (side == "short" and exit_price > ep)
+                ) else "TP"
+                record_exit(tid, exit_price, exit_reason)
+                logger.info(f"[{sym}] 저널 복구: {tid} {exit_reason} @ {exit_price:.4f}")
+        except Exception as e:
+            logger.error(f"저널 복구 오류: {e}")
 
     # ── 초기화 ────────────────────────────────────────────────
     try:
@@ -354,6 +429,7 @@ def _run_bot():
         return
 
     update_stats()
+    reconcile_journal(exchange)   # 미동기화 OPEN 거래 즉시 정산
 
     scan_count = 0
 

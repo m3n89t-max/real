@@ -26,7 +26,7 @@ from trader import (
     execute_trade, check_trailing_stop, update_stop_loss,
     adjust_sl_after_tp1,
 )
-from journal import print_stats, get_open_trades, update_stats
+from journal import print_stats, get_open_trades, update_stats, record_exit
 
 
 def setup_logging():
@@ -224,26 +224,64 @@ def _get_position_qty(exchange, symbol: str) -> float:
     return 0.0
 
 
+def _get_last_fill_price(exchange, symbol):
+    """해당 심볼의 가장 최근 체결가 조회"""
+    try:
+        trades = exchange.fetch_my_trades(symbol, limit=10)
+        if trades:
+            trades.sort(key=lambda t: t["timestamp"], reverse=True)
+            return float(trades[0]["price"])
+    except Exception:
+        pass
+    try:
+        return get_current_price(exchange, symbol)
+    except Exception:
+        return None
+
+
 def sync_positions(exchange, logger):
-    """거래소 실제 포지션과 트래커 동기화"""
+    """거래소 실제 포지션과 트래커 동기화 + 저널 청산 기록"""
     try:
         open_pos = get_open_positions(exchange)
-        open_symbols = set()
-        for p in open_pos:
-            sym = p["symbol"].split(":")[0]
-            open_symbols.add(sym)
+        open_symbols = {p["symbol"].split(":")[0] for p in open_pos}
 
         tracked = pos_tracker.get_all()
         for symbol in list(tracked.keys()):
             if symbol not in open_symbols:
-                info = tracked[symbol]
-                logger.info(f"[{symbol}] 포지션 완전 청산 감지 → 트래커 제거")
+                info     = tracked[symbol]
+                trade_id = info.get("trade_id")
+                side     = info.get("side", "long")
+                logger.info(f"[{symbol}] 포지션 청산 감지 → 저널 기록")
 
-                if info.get("current_sl", 0) > info.get("original_sl", 0):
+                exit_price = _get_last_fill_price(exchange, symbol)
+
+                cur_sl  = info.get("current_sl", 0)
+                orig_sl = info.get("original_sl", 0)
+                if cur_sl > orig_sl:
+                    exit_reason = "TP"
                     cooldown_mgr.record_win(symbol)
+                elif exit_price:
+                    ep = info.get("entry_price", exit_price)
+                    if side == "long":
+                        exit_reason = "TP" if exit_price > ep else "SL"
+                    else:
+                        exit_reason = "TP" if exit_price < ep else "SL"
+                    if exit_reason == "TP":
+                        cooldown_mgr.record_win(symbol)
+                    else:
+                        cooldown_mgr.record_loss(symbol)
+                        cooldown_mgr.set_cooldown(symbol, R.loss_cooldown_sec)
                 else:
+                    exit_reason = "SL"
                     cooldown_mgr.record_loss(symbol)
                     cooldown_mgr.set_cooldown(symbol, R.loss_cooldown_sec)
+
+                if trade_id and exit_price:
+                    try:
+                        record_exit(trade_id, exit_price, exit_reason)
+                        logger.info(f"[{symbol}] 저널 동기화: {exit_reason} @ {exit_price:.4f}")
+                    except Exception as je:
+                        logger.error(f"[{symbol}] 저널 청산 기록 실패: {je}")
 
                 pos_tracker.remove(symbol)
     except Exception as e:
