@@ -32,10 +32,10 @@
   },
 
   "진입_조건": {
-    "min_confidence":         0.50,
-    "counter_trend_min_conf": 0.65,
-    "_note_counter": "역추세 진입은 신뢰도 65% 이상 요구",
-    "min_rr_ratio":           1.5,
+    "min_confidence":         0.75,
+    "counter_trend_min_conf": 0.82,
+    "_note_counter": "역추세 진입은 신뢰도 82% 이상 요구",
+    "min_rr_ratio":           2.0,
     "_note_rr": "스캘핑 손익비 최소 1:1.5",
     "min_prg_confluence":     2,
     "prg_zone_buffer_pct":    0.003,
@@ -110,8 +110,8 @@
   "스캔": {
     "scan_interval_sec": 10,
     "_note_scan": "스캘핑: 10초마다 1m 신호 스캔",
-    "max_open_positions": 3,
-    "max_total_exposure_pct": 1.0,
-    "_note_exp": "증거금 합계 ≤ 계좌의 100% (씨드 전액 활용)"
+    "max_open_positions": 2,
+    "max_total_exposure_pct": 0.8,
+    "_note_exp": "증거금 합계 ≤ 계좌의 80% (리스크 제한)"
   }
 }

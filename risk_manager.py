@@ -50,23 +50,22 @@ def calculate_position_size(
     if stop_distance_pct <= 0:
         return 0.0
 
-    # 계좌 2% 손실 기준 최대 허용 손실
-    max_loss_usdt = balance * R.account_risk_pct
+    # 투입금액 기준 2% 손실 계산
+    # 트레이드당 할당 증거금 = 잔고 / 최대 동시 포지션 수
+    per_trade_margin = balance / max(R.max_open_positions, 1)
+    # 최대 허용 손실 = 해당 코인 투입금액(증거금)의 account_risk_pct (2%)
+    max_loss_usdt = per_trade_margin * R.account_risk_pct
 
-    # 명목금액 역산: 손실 = 명목 × 손절거리%  →  명목 = 손실 / 손절거리%
-    notional_usdt = max_loss_usdt / stop_distance_pct
-
-    # 실제 투입 증거금 = 명목 / 레버리지
-    margin_usdt = notional_usdt / leverage
-
-    # 수량
-    quantity = notional_usdt / entry_price
+    # 투입 증거금 → 명목금액 → 수량
+    notional_usdt = per_trade_margin * leverage
+    quantity      = notional_usdt / entry_price
 
     logger.info(
         f"[{symbol}] 포지션 계산 | "
-        f"잔고:{balance:.2f} | 최대손실:{max_loss_usdt:.2f} USDT | "
-        f"손절거리:{stop_distance_pct:.2%} | 증거금:{margin_usdt:.2f} | "
-        f"명목:{notional_usdt:.2f} | 레버리지:{leverage}x | 수량:{quantity:.6f}"
+        f"잔고:{balance:.2f} | 트레이드증거금:{per_trade_margin:.2f} | "
+        f"최대손실:{max_loss_usdt:.2f} USDT({R.account_risk_pct:.1%}) | "
+        f"손절거리:{stop_distance_pct:.2%} | 명목:{notional_usdt:.2f} | "
+        f"레버리지:{leverage}x | 수량:{quantity:.6f}"
     )
     return quantity
 
@@ -117,10 +116,16 @@ def is_risk_acceptable(
         logger.warning(f"[{symbol}] 손익비 부족: {rr_ratio:.2f} < {R.min_rr_ratio}")
         return False
 
-    # 단일 포지션 최대 손실: account_risk_pct × 3배 이내 (슬리피지 여유)
-    max_allowed_loss = R.account_risk_pct * 3
-    if max_loss_pct > max_allowed_loss:
-        logger.warning(f"[{symbol}] 손실 과다: {max_loss_pct:.1%} > {max_allowed_loss:.1%}")
+    # 단일 포지션 최대 손실: 트레이드 증거금의 account_risk_pct × 3배 이내
+    per_trade_margin  = balance / max(R.max_open_positions, 1)
+    max_allowed_loss_usdt = per_trade_margin * R.account_risk_pct * 3
+    actual_loss_usdt  = risk_per_unit * quantity
+    if actual_loss_usdt > max_allowed_loss_usdt:
+        logger.warning(
+            f"[{symbol}] 손실 과다: {actual_loss_usdt:.2f} USDT > "
+            f"허용 {max_allowed_loss_usdt:.2f} USDT "
+            f"(투입증거금 {per_trade_margin:.2f} × {R.account_risk_pct*3:.1%})"
+        )
         return False
 
     return True
