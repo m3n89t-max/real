@@ -205,7 +205,22 @@ def generate_signal(symbol: str, all_tf: dict) -> Optional[TradeSignal]:
         logger.info(f"[{symbol}] 4h 추세({trend_4h}) ↔ 1m 방향({wave_dir}) 반대 → 스킵")
         return None
 
-    # 1h가 반대 방향이고 신뢰도 낮으면 스킵
+    # ── 필터2: 4h + 1h 동시 확인 ─────────────────────────────
+    # 4h와 1h 중 하나라도 반대 방향이면 진입 금지
+    # (둘 다 sideways는 허용 — 횡보 돌파 노림)
+    if trend_4h != wave_dir and trend_4h != "sideways":
+        logger.info(f"[{symbol}] [필터2] 4h({trend_4h}) 불일치 → 스킵")
+        return None
+    if trend_1h != wave_dir and trend_1h != "sideways":
+        logger.info(f"[{symbol}] [필터2] 1h({trend_1h}) 불일치 → 스킵")
+        return None
+    # 4h + 1h 둘 다 sideways이면 15m 이상 방향 확인 필요
+    if trend_4h == "sideways" and trend_1h == "sideways":
+        if trend_15m != wave_dir:
+            logger.info(f"[{symbol}] [필터2] 4h·1h 모두 횡보 + 15m({trend_15m}) 미확인 → 스킵")
+            return None
+
+    # 1h가 반대 방향이고 신뢰도 낮으면 스킵 (기존 유지)
     if trend_1h not in ("sideways",) and trend_1h != wave_dir and wave_1m.confidence < R.counter_trend_min_conf:
         logger.info(f"[{symbol}] 1h 반추세({trend_1h}) + 신뢰도({wave_1m.confidence:.0%}) 부족 → 스킵")
         return None

@@ -32,9 +32,9 @@
   },
 
   "진입_조건": {
-    "min_confidence":         0.75,
-    "counter_trend_min_conf": 0.82,
-    "_note_counter": "역추세 진입은 신뢰도 82% 이상 요구",
+    "min_confidence":         0.65,
+    "counter_trend_min_conf": 0.75,
+    "_note_counter": "역추세 진입은 신뢰도 75% 이상 요구",
     "min_rr_ratio":           2.0,
     "_note_rr": "스캘핑 손익비 최소 1:1.5",
     "min_prg_confluence":     2,
